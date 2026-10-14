@@ -1,0 +1,241 @@
+from flask import Flask, render_template_string, request, jsonify
+import sqlite3
+import os
+
+app = Flask(__name__)
+DB_FILE = 'database.db'
+
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS teachers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            empId TEXT UNIQUE,
+            name TEXT NOT NULL,
+            specialty TEXT,
+            position TEXT,
+            assignedHours INTEGER,
+            phone TEXT,
+            status TEXT DEFAULT 'فعّال',
+            username TEXT UNIQUE,
+            password TEXT,
+            role TEXT DEFAULT 'teacher',
+            subjects TEXT
+        )
+    ''')
+    cursor.execute("SELECT * FROM teachers WHERE username = 'admin'")
+    if not cursor.fetchone():
+        cursor.execute("INSERT INTO teachers (empId, name, specialty, position, assignedHours, phone, username, password, role, subjects) VALUES ('1', 'مدير المعهد', 'إدارة عامة', 'مدير المعهد', 0, '03000000', 'admin', '123456', 'admin', 'الإدارة')")
+        sample_teachers = [
+            ('102', 'علي حسين شمص', 'معلوماتية صناعية', 'أستاذ مادة', 75, '03111222', 'ali.shamas', '123456', 'teacher', 'برمجة، شبكات حاسوب'),
+            ('103', 'حسين أحمد الأحمد', 'إلكترونيات واتصالات', 'رئيس دروس', 90, '70444555', 'hussein.ahmad', '123456', 'teacher', 'إلكترونيات رقمية، اتصالات')
+        ]
+        cursor.executemany("INSERT OR IGNORE INTO teachers (empId, name, specialty, position, assignedHours, phone, username, password, role, subjects) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", sample_teachers)
+    conn.commit()
+    conn.close()
+
+init_db()
+
+@app.route('/')
+def index():
+    return render_template_string(HTML_TEMPLATE)
+
+@app.route('/api/teachers', methods=['GET'])
+def get_teachers():
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    teachers = [dict(row) for row in cursor.execute("SELECT * FROM teachers").fetchall()]
+    conn.close()
+    return jsonify(teachers)
+
+@app.route('/api/teachers', methods=['POST'])
+def add_teacher():
+    data = request.json
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO teachers (empId, name, specialty, position, assignedHours, phone, username, password, role, subjects)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'teacher', ?)
+        """, (data.get('empId'), data.get('name'), data.get('specialty'), data.get('position', 'أستاذ مادة'), data.get('assignedHours', 0), data.get('phone', ''), data.get('username'), data.get('password', '123456'), data.get('subjects', '')))
+        conn.commit()
+        success = True
+    except:
+        success = False
+    conn.close()
+    return jsonify({"success": success})
+
+@app.route('/api/teachers/<int:teacher_id>', methods=['DELETE'])
+def delete_teacher(teacher_id):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM teachers WHERE id = ? AND role != 'admin'", (teacher_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"success": True})
+
+HTML_TEMPLATE = """<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>معهد الهرمل الفني - النظام الرسمي</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
+    <style>body { font-family: 'Cairo', sans-serif; background-color: #f4f6f9; }</style>
+</head>
+<body class="min-h-screen text-gray-800 flex flex-col" x-data="schoolApp()">
+    <header class="bg-indigo-900 text-white shadow-md">
+        <div class="container mx-auto px-4 py-3 flex justify-between items-center">
+            <div class="flex items-center space-x-3 space-x-reverse">
+                <div class="bg-white text-indigo-900 p-2 rounded-lg font-bold text-xl shadow">م.ه.ف</div>
+                <div>
+                    <h1 class="text-lg font-bold">معهد الهرمل الفني</h1>
+                    <p class="text-xs text-indigo-200">المنصة الإلكترونية الإدارية الرسمية</p>
+                </div>
+            </div>
+            <div class="flex items-center space-x-4 space-x-reverse" x-show="currentUser">
+                <span class="text-sm bg-indigo-800 px-3 py-1 rounded-full border border-indigo-700">
+                    مرحباً، <strong x-text="currentUser.name"></strong>
+                </span>
+                <button @click="logout()" class="bg-red-600 hover:bg-red-700 text-white text-xs px-3 py-2 rounded-lg transition shadow">تسجيل الخروج</button>
+            </div>
+        </div>
+    </header>
+    <main class="flex-grow container mx-auto px-4 py-6">
+        <template x-if="!currentUser">
+            <div class="max-w-md mx-auto bg-white rounded-xl shadow-lg overflow-hidden mt-10 border border-gray-100">
+                <div class="bg-indigo-800 text-white py-6 px-8 text-center">
+                    <h2 class="text-2xl font-bold">تسجيل الدخول للنظام</h2>
+                    <p class="text-indigo-200 text-sm mt-1">بوابة إدارة المعهد والأساتذة</p>
+                </div>
+                <div class="p-8 space-y-6">
+                    <div>
+                        <label class="block text-sm font-semibold mb-2">اسم المستخدم:</label>
+                        <input type="text" x-model="loginForm.username" class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" placeholder="admin">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-semibold mb-2">كلمة المرور:</label>
+                        <input type="password" x-model="loginForm.password" class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" placeholder="123456">
+                    </div>
+                    <div class="text-red-500 text-sm bg-red-50 p-2 rounded text-center" x-text="loginError" x-show="loginError"></div>
+                    <button @click="handleLogin()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg transition shadow">دخول إلى لوحة التحكم</button>
+                    <div class="border-t pt-4 text-xs text-gray-500 space-y-2 bg-gray-50 p-3 rounded-lg">
+                        <p class="font-bold text-indigo-900">حساب تجريبي:</p>
+                        <p>🔹 <strong>المدير:</strong> <code class="bg-white px-1 border rounded text-indigo-700">admin</code> | كلمة المرور: <code class="bg-white px-1 border rounded text-indigo-700">123456</code></p>
+                    </div>
+                </div>
+            </div>
+        </template>
+        <template x-if="currentUser && currentUser.role === 'admin'">
+            <div class="space-y-6">
+                <div class="bg-white p-6 rounded-xl shadow border-r-4 border-indigo-600 flex justify-between items-center">
+                    <div>
+                        <h4 class="text-gray-500 text-sm font-semibold">إجمالي الأساتذة المسجلين</h4>
+                        <p class="text-3xl font-bold text-indigo-900 mt-2" x-text="teachers.length - 1">0</p>
+                    </div>
+                    <button @click="showAddModal = true" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-sm shadow transition">+ إضافة أستاذ جديد</button>
+                </div>
+                <div class="bg-white p-6 rounded-xl shadow border border-indigo-100" x-show="showAddModal" x-cloak>
+                    <h3 class="text-lg font-bold text-indigo-900 mb-4 border-b pb-2">إضافة أستاذ جديد</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                        <div><label class="block font-semibold mb-1">الاسم الثلاثي:</label><input type="text" x-model="newTeacher.name" class="w-full p-2 border rounded-lg"></div>
+                        <div><label class="block font-semibold mb-1">الرقم الوظيفي:</label><input type="text" x-model="newTeacher.empId" class="w-full p-2 border rounded-lg"></div>
+                        <div><label class="block font-semibold mb-1">الاختصاص:</label><input type="text" x-model="newTeacher.specialty" class="w-full p-2 border rounded-lg"></div>
+                        <div><label class="block font-semibold mb-1">المواد المسندة:</label><input type="text" x-model="newTeacher.subjects" class="w-full p-2 border rounded-lg"></div>
+                        <div><label class="block font-semibold mb-1">الساعات المخصصة:</label><input type="number" x-model="newTeacher.assignedHours" class="w-full p-2 border rounded-lg"></div>
+                        <div><label class="block font-semibold mb-1">رقم الهاتف:</label><input type="text" x-model="newTeacher.phone" class="w-full p-2 border rounded-lg"></div>
+                        <div><label class="block font-semibold mb-1">اسم المستخدم:</label><input type="text" x-model="newTeacher.username" class="w-full p-2 border rounded-lg"></div>
+                        <div><label class="block font-semibold mb-1">كلمة المرور:</label><input type="password" x-model="newTeacher.password" class="w-full p-2 border rounded-lg" placeholder="123456"></div>
+                    </div>
+                    <div class="flex space-x-3 space-x-reverse mt-4">
+                        <button @click="saveTeacher()" class="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg font-bold text-sm">حفظ</button>
+                        <button @click="showAddModal = false" class="bg-gray-400 hover:bg-gray-500 text-white px-5 py-2 rounded-lg font-bold text-sm">إلغاء</button>
+                    </div>
+                </div>
+                <div class="bg-white p-6 rounded-xl shadow space-y-4">
+                    <h3 class="text-xl font-bold text-indigo-900 border-b pb-3">قائمة الأساتذة</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-right border-collapse">
+                            <thead>
+                                <tr class="bg-indigo-50 text-indigo-900 text-sm">
+                                    <th class="p-3 border">الرقم</th>
+                                    <th class="p-3 border">الاسم</th>
+                                    <th class="p-3 border">الاختصاص</th>
+                                    <th class="p-3 border">المواد</th>
+                                    <th class="p-3 border">الساعات</th>
+                                    <th class="p-3 border">اسم المستخدم</th>
+                                    <th class="p-3 border text-center">إجراء</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="t in teachers.filter(x => x.role !== 'admin')" :key="t.id">
+                                    <tr class="hover:bg-gray-50 text-sm">
+                                        <td class="p-3 border" x-text="t.empId"></td>
+                                        <td class="p-3 border font-semibold text-indigo-900" x-text="t.name"></td>
+                                        <td class="p-3 border" x-text="t.specialty"></td>
+                                        <td class="p-3 border" x-text="t.subjects"></td>
+                                        <td class="p-3 border font-bold text-center" x-text="t.assignedHours"></td>
+                                        <td class="p-3 border text-indigo-600 font-mono" x-text="t.username"></td>
+                                        <td class="p-3 border text-center"><button @click="deleteTeacher(t.id)" class="bg-red-500 text-white px-3 py-1 rounded text-xs">حذف</button></td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </template>
+        <template x-if="currentUser && currentUser.role === 'teacher'">
+            <div class="space-y-6 max-w-3xl mx-auto">
+                <div class="bg-white p-6 rounded-xl shadow space-y-4 border-t-4 border-indigo-600">
+                    <h3 class="text-xl font-bold text-indigo-900">الملف الشخصي للأستاذ</h3>
+                    <div class="grid grid-cols-2 gap-4 bg-indigo-50 p-4 rounded-lg text-sm">
+                        <div><strong>الاسم:</strong> <span x-text="currentUser.name"></span></div>
+                        <div><strong>الاختصاص:</strong> <span x-text="currentUser.specialty"></span></div>
+                        <div><strong>المواد:</strong> <span x-text="currentUser.subjects"></span></div>
+                        <div><strong>الساعات المخصصة:</strong> <span x-text="currentUser.assignedHours" class="font-bold text-indigo-700"></span> ساعة</div>
+                    </div>
+                </div>
+            </div>
+        </template>
+    </main>
+    <footer class="bg-white border-t py-4 text-center text-xs text-gray-500 mt-auto">جميع الحقوق محفوظة © 2026 - معهد الهرمل الفني</footer>
+    <script>
+        function schoolApp() {
+            return {
+                currentUser: null, teachers: [], showAddModal: false,
+                loginForm: { username: '', password: '' }, loginError: '',
+                newTeacher: { empId: '', name: '', specialty: '', subjects: '', assignedHours: 0, phone: '', username: '', password: '123456' },
+                async init() { await this.fetchTeachers(); },
+                async fetchTeachers() {
+                    let res = await fetch('/api/teachers');
+                    this.teachers = await res.json();
+                },
+                async saveTeacher() {
+                    let res = await fetch('/api/teachers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this.newTeacher) });
+                    let data = await res.json();
+                    if (data.success) { alert('تم بنجاح'); this.showAddModal = false; await this.fetchTeachers(); }
+                    else { alert('حدث خطأ أو اسم المستخدم موجود مسبقاً'); }
+                },
+                async deleteTeacher(id) {
+                    if (confirm('هل أنت متأكد؟')) { await fetch('/api/teachers/' + id, { method: 'DELETE' }); await this.fetchTeachers(); }
+                },
+                handleLogin() {
+                    let found = this.teachers.find(t => t.username === this.loginForm.username && t.password === this.loginForm.password);
+                    if (found) { this.currentUser = found; this.loginError = ''; }
+                    else { this.loginError = 'بيانات الدخول غير صحيحة'; }
+                },
+                logout() { this.currentUser = null; }
+            }
+        }
+    </script>
+</body>
+</html>
+"""
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
