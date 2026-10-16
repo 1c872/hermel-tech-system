@@ -81,7 +81,6 @@ def manifest():
         "orientation": "portrait"
     })
 
-# Service Worker المسؤول عن إظهار الإشعار بجانب الساعة واهتزاز الهاتف
 @app.route('/sw.js')
 def service_worker():
     sw_code = f"""
@@ -565,6 +564,14 @@ def teacher_dashboard():
             let currentNotifCount = {initial_notif_count};
             let audioCtx = null;
 
+            // إخفاء الشريط البرتقالي تلقائياً إذا كان الأستاذ قد نُقر عليه مسبقاً
+            document.addEventListener("DOMContentLoaded", () => {{
+                if (localStorage.getItem('notif_enabled') === 'true') {{
+                    const btn = document.getElementById('notifBtn');
+                    if (btn) btn.style.display = 'none';
+                }}
+            }});
+
             function playLoudRing() {{
                 try {{
                     if (!audioCtx) {{
@@ -602,18 +609,21 @@ def teacher_dashboard():
                     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                 }}
                 playLoudRing();
+                
+                // حفظ خيار التفعيل في ذاكرة الهاتف لإخفاء الشريط البرتقالي في المرات القادمة
+                localStorage.setItem('notif_enabled', 'true');
+                const btn = document.getElementById('notifBtn');
+                if (btn) btn.style.display = 'none';
 
                 if ('Notification' in window) {{
                     Notification.requestPermission().then(permission => {{
                         if (permission === 'granted') {{
-                            document.getElementById('notifBtn').style.background = '#38a169';
-                            document.getElementById('notifBtn').innerHTML = '✅ تم تفعيل الإشعارات العلوية والصوت بنجاح';
+                            triggerTopPushNotification("تم تفعيل نظام التنبيهات بنجاح!");
                         }}
                     }});
                 }}
             }}
 
-            // إرسال الإشعار للظهور بجانب الساعة في أعلى الشاشة
             function triggerTopPushNotification(msgText) {{
                 if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {{
                     navigator.serviceWorker.controller.postMessage({{
@@ -631,7 +641,6 @@ def teacher_dashboard():
                 }}
             }}
 
-            // فحص تلقائي للسيرفر كل 8 ثوانٍ لإرسال الإشعار العلوي وإطلاق الصوت
             setInterval(() => {{
                 fetch('/api/check_notifications')
                     .then(res => res.json())
