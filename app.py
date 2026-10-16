@@ -116,7 +116,7 @@ def download_template():
     
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df_template.to_excel(writer, index=False, sheet_name='الحصص والنقل الشهري')
+        df_template.to_excel(output, index=False, sheet_name='الحصص والنقل الشهري')
     output.seek(0)
     
     return send_file(
@@ -298,7 +298,8 @@ def admin_dashboard():
         </tr>
         """
 
-    active_teachers_opts = "".join([f'<option value="{u}">{t["name"]}</option>' for u,t in teachers_db.items() if u != 'admin'])
+    # توليد خيارات الأساتذة للقائمة المنسدلة
+    active_teachers_opts = "".join([f'<option value="{u}">{t["name"]} ({t["subject"]})</option>' for u,t in teachers_db.items() if u != 'admin'])
 
     return f'''
     <!DOCTYPE html>
@@ -353,7 +354,15 @@ def admin_dashboard():
                 <h4>📢 إرسال إشعار / تنبيه لأستاذ:</h4>
                 <form method="POST">
                     <input type="hidden" name="action" value="send_notification">
-                    <select name="target_user" required>{active_teachers_opts}</select>
+                    
+                    <!-- مربع البحث السريع لتصفية وتسهيل اختيار الأستاذ -->
+                    <label style="font-size:12px; color:#4a5568; font-weight:bold;">🔍 ابحث عن اسم الأستاذ أو المادة:</label>
+                    <input type="text" id="teacherSearchInput" placeholder="اكتب للبحث السريع عن الاسم..." onkeyup="filterTeachers()" style="margin:0;">
+                    
+                    <select name="target_user" id="teacherSelect" required size="4" style="height: 110px;">
+                        {active_teachers_opts}
+                    </select>
+                    
                     <input type="text" name="notification_text" placeholder="نص الرسالة والتنبيه..." required>
                     <button type="submit" style="background:#2b6cb0;">إرسال التنبيه الفوري</button>
                 </form>
@@ -384,6 +393,24 @@ def admin_dashboard():
         </div>
 
         <div class="designer-tag">🛠️ تم تصميم وتطوير البرنامج من قبل الأستاذ محمد حسين شمص</div>
+
+        <script>
+            // دالة البحث الفوري داخل قائمة الأساتذة
+            function filterTeachers() {{
+                let input = document.getElementById('teacherSearchInput').value.toLowerCase();
+                let select = document.getElementById('teacherSelect');
+                let options = select.options;
+
+                for (let i = 0; i < options.length; i++) {{
+                    let text = options[i].text.toLowerCase();
+                    if (text.includes(input)) {{
+                        options[i].style.display = "";
+                    }} else {{
+                        options[i].style.display = "none";
+                    }}
+                }}
+            }}
+        </script>
     </body>
     </html>
     '''
@@ -463,7 +490,6 @@ def teacher_dashboard():
             button {{ background: #38a169; color: white; border: none; padding: 10px 15px; border-radius: 6px; font-weight: bold; cursor: pointer; }}
             .designer-tag {{ margin-top: 30px; color: #718096; font-size: 13px; font-weight: 500; text-align: center; border-top: 1px solid #cbd5e0; padding-top: 15px; }}
             
-            /* شريط التنبيه التقني المريح المدمج بدون إزعاج */
             #smoothBanner {{
                 display: none;
                 background: linear-gradient(90deg, #1e3a8a, #2563eb);
@@ -483,7 +509,6 @@ def teacher_dashboard():
             <span style="font-size:14px;">أهلاً بك أستاذ: {user_data.get('name')} | <a href="/logout" style="color:#feb2b2; text-decoration:none; font-weight:bold;">خروج</a></span>
         </div>
 
-        <!-- شريط تنبيه أنيق وغير مزعج يظهر بالتدريج عند إضافة رسالة -->
         <div id="smoothBanner">
             ⚡ <b>رسالة جديدة من مدير المعهد:</b> <span id="bannerText"></span>
         </div>
@@ -564,7 +589,6 @@ def teacher_dashboard():
             let currentNotifCount = {initial_notif_count};
             let audioCtx = null;
 
-            // نغمة خفيفة وراقية لمرة واحدة فقط دون إزعاج
             function playSubtleTone() {{
                 try {{
                     if (!audioCtx) {{
@@ -574,7 +598,7 @@ def teacher_dashboard():
                     let gain = audioCtx.createGain();
 
                     osc.type = 'sine';
-                    osc.frequency.setValueAtTime(659.25, audioCtx.currentTime); // نغمة E5 هادئة
+                    osc.frequency.setValueAtTime(659.25, audioCtx.currentTime);
 
                     gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
                     gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
@@ -593,7 +617,6 @@ def teacher_dashboard():
                 playSubtleTone();
             }}
 
-            // فحص السيرفر بشكل صامت كل 10 ثوانٍ
             setInterval(() => {{
                 fetch('/api/check_notifications')
                     .then(res => res.json())
