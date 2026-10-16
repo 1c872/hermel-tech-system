@@ -116,7 +116,7 @@ def download_template():
     
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df_template.to_excel(output, index=False, sheet_name='الحصص والنقل الشهري')
+        df_template.to_excel(writer, index=False, sheet_name='الحصص والنقل الشهري')
     output.seek(0)
     
     return send_file(
@@ -243,7 +243,15 @@ def admin_dashboard():
         elif action == 'send_notification':
             target_user = request.form.get('target_user')
             notif = request.form.get('notification_text')
-            if target_user in teachers_db and notif:
+            
+            if target_user == 'all':
+                count = 0
+                for u, t_data in teachers_db.items():
+                    if u != 'admin':
+                        t_data['notifications'].append(f"📢 تعميم إداري: {notif}")
+                        count += 1
+                msg = f"تم إرسال التعميم بنجاح لجميع الأساتذة (عدد {count})!"
+            elif target_user in teachers_db and notif:
                 teachers_db[target_user]['notifications'].append(notif)
                 msg = f"تم إرسال الإشعار والتنبيه للأستاذ {teachers_db[target_user]['name']} بنجاح!"
 
@@ -298,8 +306,14 @@ def admin_dashboard():
         </tr>
         """
 
-    # توليد خيارات الأساتذة للقائمة المنسدلة
-    active_teachers_opts = "".join([f'<option value="{u}">{t["name"]} ({t["subject"]})</option>' for u,t in teachers_db.items() if u != 'admin'])
+    # تجهيز قائمة الأساتذة للاستخدام في محرك البحث التفاعلي (JavaScript Array)
+    teachers_json_list = [{"username": "all", "name": "📢 إرسال لجميع الأساتذة (تعميم عام)", "subject": "الجميع"}]
+    for u, t in teachers_db.items():
+        if u != 'admin':
+            teachers_json_list.append({"username": u, "name": t['name'], "subject": t['subject']})
+
+    import json
+    teachers_json_str = json.dumps(teachers_json_list, ensure_ascii=False)
 
     return f'''
     <!DOCTYPE html>
@@ -322,6 +336,34 @@ def admin_dashboard():
             .msg {{ background: #c6f6d5; color: #22543d; padding: 12px; border-radius: 8px; margin-top: 15px; font-weight: bold; text-align: center; }}
             .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; }}
             .designer-tag {{ margin-top: 30px; color: #718096; font-size: 13px; font-weight: 500; text-align: center; border-top: 1px solid #cbd5e0; padding-top: 15px; }}
+            
+            /* تصميم قائمة الاقتراحات التفاعلية (Autocomplete Dropdown) */
+            .autocomplete-container {{ position: relative; width: 100%; }}
+            #suggestionsList {{
+                position: absolute;
+                top: 100%;
+                left: 0; right: 0;
+                background: white;
+                border: 1px solid #cbd5e0;
+                border-radius: 0 0 6px 6px;
+                max-height: 180px;
+                overflow-y: auto;
+                z-index: 1000;
+                display: none;
+                box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            }}
+            .suggestion-item {{
+                padding: 10px;
+                cursor: pointer;
+                border-bottom: 1px solid #edf2f7;
+                font-size: 14px;
+                text-align: right;
+            }}
+            .suggestion-item:hover {{
+                background: #ebf8ff;
+                color: #2b6cb0;
+                font-weight: bold;
+            }}
         </style>
     </head>
     <body>
@@ -350,21 +392,29 @@ def admin_dashboard():
                 </form>
             </div>
 
-            <div class="card">
-                <h4>📢 إرسال إشعار / تنبيه لأستاذ:</h4>
+            <div class="card" style="border-top: 4px solid #2b6cb0;">
+                <h4>📢 إرسال إشعار / تعليمات للأساتذة:</h4>
                 <form method="POST">
                     <input type="hidden" name="action" value="send_notification">
                     
-                    <!-- مربع البحث السريع لتصفية وتسهيل اختيار الأستاذ -->
-                    <label style="font-size:12px; color:#4a5568; font-weight:bold;">🔍 ابحث عن اسم الأستاذ أو المادة:</label>
-                    <input type="text" id="teacherSearchInput" placeholder="اكتب للبحث السريع عن الاسم..." onkeyup="filterTeachers()" style="margin:0;">
+                    <!-- حقل البحث التفاعلي التلقائي -->
+                    <label style="font-size:12px; color:#4a5568; font-weight:bold;">🔍 اكتب اسم الأستاذ للبحث الفوري:</label>
+                    <div class="autocomplete-container">
+                        <input type="text" id="teacherSearchBox" placeholder="اكتب للبحث عن الاسم..." oninput="onSearchInput()" autocomplete="off" style="margin:0;">
+                        <!-- القائمة المنسدلة الذكية التي تظهر النتائج عند الكتابة -->
+                        <div id="suggestionsList"></div>
+                    </div>
                     
-                    <select name="target_user" id="teacherSelect" required size="4" style="height: 110px;">
-                        {active_teachers_opts}
-                    </select>
+                    <!-- الحقل المخفي الذي يحمل الـ username الفعلي لإرساله للسيرفر -->
+                    <input type="hidden" name="target_user" id="selectedTeacherUsername" value="all" required>
                     
-                    <input type="text" name="notification_text" placeholder="نص الرسالة والتنبيه..." required>
-                    <button type="submit" style="background:#2b6cb0;">إرسال التنبيه الفوري</button>
+                    <div id="selectedTeacherDisplay" style="background:#edf2f7; padding:8px; border-radius:6px; font-size:13px; color:#2b6cb0; font-weight:bold; text-align:center;">
+                        🎯 المستهدف حالياً: إرسال لجميع الأساتذة (تعميم عام)
+                    </div>
+                    
+                    <textarea name="notification_text" placeholder="اكتب التعليمات أو الرسالة هنا..." required style="width:100%; height:70px; padding:10px; border:1px solid #cbd5e0; border-radius:6px; box-sizing:border-box; font-family:inherit;"></textarea>
+                    
+                    <button type="submit" style="background:#2b6cb0;">📢 إرسال التنبيه / التعميم</button>
                 </form>
             </div>
 
@@ -372,7 +422,9 @@ def admin_dashboard():
                 <h4>📄 رفع جدول التدريس (PDF):</h4>
                 <form method="POST" enctype="multipart/form-data">
                     <input type="hidden" name="action" value="upload_pdf">
-                    <select name="target_user" required>{active_teachers_opts}</select>
+                    <select name="target_user" required>
+                        {''.join([f'<option value="{u}">{t["name"]} ({t["subject"]})</option>' for u,t in teachers_db.items() if u != 'admin'])}
+                    </select>
                     <input type="file" name="pdf_file" accept=".pdf" required>
                     <button type="submit" style="background:#4a5568;">رفع ملف PDF</button>
                 </form>
@@ -395,21 +447,48 @@ def admin_dashboard():
         <div class="designer-tag">🛠️ تم تصميم وتطوير البرنامج من قبل الأستاذ محمد حسين شمص</div>
 
         <script>
-            // دالة البحث الفوري داخل قائمة الأساتذة
-            function filterTeachers() {{
-                let input = document.getElementById('teacherSearchInput').value.toLowerCase();
-                let select = document.getElementById('teacherSelect');
-                let options = select.options;
+            const allTeachers = {teachers_json_str};
 
-                for (let i = 0; i < options.length; i++) {{
-                    let text = options[i].text.toLowerCase();
-                    if (text.includes(input)) {{
-                        options[i].style.display = "";
-                    }} else {{
-                        options[i].style.display = "none";
-                    }}
+            // دالة تصفية وعرض الأسماء فور البدء بالكتابة
+            function onSearchInput() {{
+                let query = document.getElementById('teacherSearchBox').value.trim().toLowerCase();
+                let listDiv = document.getElementById('suggestionsList');
+                listDiv.innerHTML = '';
+
+                if (query === '') {{
+                    listDiv.style.display = 'none';
+                    return;
                 }}
+
+                let filtered = allTeachers.filter(t => t.name.toLowerCase().includes(query) || t.subject.toLowerCase().includes(query));
+
+                if (filtered.length === 0) {{
+                    listDiv.style.display = 'none';
+                    return;
+                }}
+
+                filtered.forEach(t => {{
+                    let item = document.createElement('div');
+                    item.className = 'suggestion-item';
+                    item.innerHTML = `<b>${{t.name}}</b> <small style="color:#718096;">(${{t.subject}})</small>`;
+                    item.onclick = function() {{
+                        document.getElementById('teacherSearchBox').value = t.name;
+                        document.getElementById('selectedTeacherUsername').value = t.username;
+                        document.getElementById('selectedTeacherDisplay').innerText = "🎯 المستهدف: " + t.name;
+                        listDiv.style.display = 'none';
+                    }};
+                    listDiv.appendChild(item);
+                }});
+
+                listDiv.style.display = 'block';
             }}
+
+            // إخفاء القائمة عند النقر خارجها
+            document.addEventListener('click', function(e) {{
+                if (!e.target.closest('.autocomplete-container')) {{
+                    document.getElementById('suggestionsList').style.display = 'none';
+                }}
+            }});
         </script>
     </body>
     </html>
@@ -443,7 +522,7 @@ def teacher_dashboard():
             msg = "تم إرسال إجابتك/رسالتك لمدير المعهد بنجاح!"
 
     notifs_list = user_data.get('notifications', [])
-    notifs_html = "".join([f"<div class='notif-box'>🔔 <b>إشعار جديد:</b> {n}</div>" for n in notifs_list])
+    notifs_html = "".join([f"<div class='notif-box'>🔔 <b>إشعار/تعميم:</b> {n}</div>" for n in notifs_list])
     pdf_html = f"<a href='/uploads/{user_data['schedule_pdf']}' class='btn-pdf' target='_blank'>📄 فتح/تحميل جدول الحصص PDF</a>" if user_data.get('schedule_pdf') else "لم يتم رفع جدول الحصص بعد."
     
     total_hours_executed = 0
@@ -516,8 +595,8 @@ def teacher_dashboard():
         {f'<div style="background:#c6f6d5; color:#22543d; padding:10px; border-radius:6px; margin-top:10px; font-weight:bold;">{msg}</div>' if msg else ''}
 
         <div class="card" id="notifArea">
-            <h4>📩 التنبيهات والإشعارات الواردة:</h4>
-            <div id="notifContent">{notifs_html if notifs_html else '<p style="color:#718096;">لا توجد إشعارات جديدة حالياً.</p>'}</div>
+            <h4>📩 التنبيهات والتعاميم الواردة:</h4>
+            <div id="notifContent">{notifs_html if notifs_html else '<p style="color:#718096;">لا توجد تعاميم جديدة حالياً.</p>'}</div>
         </div>
 
         <div class="card" style="border-top: 4px solid #2b6cb0;">
