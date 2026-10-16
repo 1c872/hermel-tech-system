@@ -60,7 +60,6 @@ load_initial_teachers()
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# رابط أيقونة ثابت ومباشر لضمان ظهورها فوراً
 ICON_URL = "https://cdn-icons-png.flaticon.com/512/3135/3135755.png"
 
 @app.route('/manifest.json')
@@ -93,6 +92,16 @@ def service_worker():
     });
     """
     return app.response_class(sw_code, mimetype='application/javascript')
+
+# API لفحص التنبيهات تلقائياً من هاتف الأستاذ
+@app.route('/api/check_notifications')
+def check_notifications():
+    if session.get('role') == 'teacher':
+        username = session.get('username')
+        user_data = teachers_db.get(username, {})
+        notifs = user_data.get('notifications', [])
+        return jsonify({'count': len(notifs), 'latest': notifs[-1] if notifs else ''})
+    return jsonify({'count': 0, 'latest': ''})
 
 @app.route('/admin/download_template')
 def download_template():
@@ -428,7 +437,7 @@ def teacher_dashboard():
     contract_total = user_data.get('contract_hours', 0)
     remaining_hours = max(0, contract_total - total_hours_executed)
 
-    has_notif_js = 'true' if len(notifs_list) > 0 else 'false'
+    initial_notif_count = len(notifs_list)
 
     return f'''
     <!DOCTYPE html>
@@ -445,7 +454,8 @@ def teacher_dashboard():
             .info-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 10px; }}
             .info-item {{ background: #edf2f7; padding: 10px 14px; border-radius: 8px; font-size: 13.5px; line-height: 1.6; }}
             .info-item b {{ color: #1a365d; }}
-            .notif-box {{ background: #ebf8ff; border-right: 4px solid #3182ce; color: #2b6cb0; padding: 12px; margin-bottom: 8px; border-radius: 6px; font-weight: bold; }}
+            .notif-box {{ background: #ebf8ff; border-right: 4px solid #3182ce; color: #2b6cb0; padding: 12px; margin-bottom: 8px; border-radius: 6px; font-weight: bold; animation: pulse 1.5s infinite; }}
+            @keyframes pulse {{ 0% {{ opacity: 1; }} 50% {{ opacity: 0.6; }} 100% {{ opacity: 1; }} }}
             .btn-pdf {{ display: inline-block; background: #2b6cb0; color: white; padding: 10px 15px; border-radius: 6px; text-decoration: none; font-weight: bold; }}
             table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
             th, td {{ border: 1px solid #e2e8f0; padding: 10px; text-align: center; font-size: 14px; }}
@@ -462,9 +472,16 @@ def teacher_dashboard():
             <span style="font-size:14px;">أهلاً بك أستاذ: {user_data.get('name')} | <a href="/logout" style="color:#feb2b2; text-decoration:none; font-weight:bold;">خروج</a></span>
         </div>
 
+        <button onclick="enableNotifications()" style="width:100%; margin-top:10px; background:#dd6b20; color:white; padding:12px; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">
+            🔔 تفعيل إشعارات وتنبيهات الصوت للهاتف
+        </button>
+
         {f'<div style="background:#c6f6d5; color:#22543d; padding:10px; border-radius:6px; margin-top:10px; font-weight:bold;">{msg}</div>' if msg else ''}
 
-        {f'<div class="card"><h4>📩 التنبيهات والإشعارات الواردة:</h4>{notifs_html}</div>' if notifs_html else ''}
+        <div class="card" id="notifArea">
+            <h4>📩 التنبيهات والإشعارات الواردة:</h4>
+            <div id="notifContent">{notifs_html if notifs_html else '<p style="color:#718096;">لا توجد إشعارات جديدة حالياً.</p>'}</div>
+        </div>
 
         <div class="card" style="border-top: 4px solid #2b6cb0;">
             <h4 style="margin-top:0; color:#1a365d; border-bottom:2px solid #edf2f7; padding-bottom:8px;">📋 البطاقة الشخصية والمعلومات الإدارية الكاملة:</h4>
@@ -532,24 +549,55 @@ def teacher_dashboard():
         <div class="designer-tag">🛠️ تم تصميم وتطوير البرنامج من قبل الأستاذ محمد حسين شمص</div>
 
         <script>
-            const hasNotif = {has_notif_js};
-            if (hasNotif && 'Notification' in window) {{
-                if (Notification.permission === 'granted') {{
-                    new Notification("معهد الهرمل الفني", {{
-                        body: "لديك إشعار جديد من إدارة المعهد!",
-                        icon: "{ICON_URL}"
-                    }});
+            let currentNotifCount = {initial_notif_count};
+
+            function playSound() {{
+                try {{
                     let audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                     let osc = audioCtx.createOscillator();
+                    let gain = audioCtx.createGain();
                     osc.type = 'sine';
-                    osc.frequency.setValueAtTime(587.33, audioCtx.currentTime);
-                    osc.connect(audioCtx.destination);
+                    osc.frequency.setValueAtTime(880, audioCtx.currentTime); // نغمة مرتفعة تنبيهية A5
+                    gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
                     osc.start();
-                    osc.stop(audioCtx.currentTime + 0.3);
-                }} else if (Notification.permission !== 'denied') {{
-                    Notification.requestPermission();
+                    osc.stop(audioCtx.currentTime + 0.5);
+                }} catch(e) {{}}
+            }}
+
+            function enableNotifications() {{
+                if ('Notification' in window) {{
+                    Notification.requestPermission().then(permission => {{
+                        if (permission === 'granted') {{
+                            alert("تم تفعيل الإشعارات والتنبيهات بنجاح! ستصلك تنبيهات ورنين الإدارة فوراً.");
+                            playSound();
+                        }}
+                    }});
                 }}
             }}
+
+            // فحص تلقائي للسيرفر كل 10 ثوانٍ للتحقق من الرسائل الجديدة
+            setInterval(() => {{
+                fetch('/api/check_notifications')
+                    .then(res => res.json())
+                    .then(data => {{
+                        if (data.count > currentNotifCount) {{
+                            currentNotifCount = data.count;
+                            playSound();
+                            
+                            if (Notification.permission === 'granted') {{
+                                new Notification("معهد الهرمل الفني", {{
+                                    body: "إشعار جديد من المدير: " + data.latest,
+                                    icon: "{ICON_URL}"
+                                }});
+                            }}
+                            
+                            // تحديث الصفحة تلقائياً ليعرض الإشعار الجديد فوراً
+                            location.reload();
+                        }}
+                    }});
+            }}, 10000);
         </script>
     </body>
     </html>
