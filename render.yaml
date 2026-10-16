@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: hermel-technical-institute-lb
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: PYTHON_VERSION
+        name: 3.10.0
