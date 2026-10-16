@@ -81,19 +81,32 @@ def manifest():
         "orientation": "portrait"
     })
 
+# Service Worker المسؤول عن إظهار الإشعار بجانب الساعة واهتزاز الهاتف
 @app.route('/sw.js')
 def service_worker():
-    sw_code = """
-    self.addEventListener('install', (e) => {
+    sw_code = f"""
+    self.addEventListener('install', (e) => {{
         self.skipWaiting();
-    });
-    self.addEventListener('fetch', (e) => {
-        e.respondWith(fetch(e.request));
-    });
+    }});
+    self.addEventListener('activate', (e) => {{
+        e.waitUntil(self.clients.claim());
+    }});
+
+    self.addEventListener('message', (e) => {{
+        if (e.data && e.data.type === 'SHOW_NOTIFICATION') {{
+            self.registration.showNotification(e.data.title, {{
+                body: e.data.body,
+                icon: '{ICON_URL}',
+                badge: '{ICON_URL}',
+                vibrate: [500, 200, 500, 200, 500],
+                requireInteraction: true,
+                tag: 'admin-msg'
+            }});
+        }}
+    }});
     """
     return app.response_class(sw_code, mimetype='application/javascript')
 
-# API لفحص التنبيهات تلقائياً من هاتف الأستاذ
 @app.route('/api/check_notifications')
 def check_notifications():
     if session.get('role') == 'teacher':
@@ -472,8 +485,8 @@ def teacher_dashboard():
             <span style="font-size:14px;">أهلاً بك أستاذ: {user_data.get('name')} | <a href="/logout" style="color:#feb2b2; text-decoration:none; font-weight:bold;">خروج</a></span>
         </div>
 
-        <button onclick="enableNotifications()" style="width:100%; margin-top:10px; background:#dd6b20; color:white; padding:12px; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">
-            🔔 تفعيل إشعارات وتنبيهات الصوت للهاتف
+        <button id="notifBtn" onclick="enableNotifications()" style="width:100%; margin-top:10px; background:#dd6b20; color:white; padding:12px; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">
+            🔔 انقر هنا مرة واحدة لتفعيل الإشعارات العلوية والصوت القوي
         </button>
 
         {f'<div style="background:#c6f6d5; color:#22543d; padding:10px; border-radius:6px; margin-top:10px; font-weight:bold;">{msg}</div>' if msg else ''}
@@ -550,54 +563,90 @@ def teacher_dashboard():
 
         <script>
             let currentNotifCount = {initial_notif_count};
+            let audioCtx = null;
 
-            function playSound() {{
+            function playLoudRing() {{
                 try {{
-                    let audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                    let osc = audioCtx.createOscillator();
-                    let gain = audioCtx.createGain();
-                    osc.type = 'sine';
-                    osc.frequency.setValueAtTime(880, audioCtx.currentTime); // نغمة مرتفعة تنبيهية A5
-                    gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
-                    osc.connect(gain);
-                    gain.connect(audioCtx.destination);
-                    osc.start();
-                    osc.stop(audioCtx.currentTime + 0.5);
+                    if (!audioCtx) {{
+                        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                    }}
+                    for (let i = 0; i < 3; i++) {{
+                        let start = audioCtx.currentTime + (i * 0.4);
+                        let osc1 = audioCtx.createOscillator();
+                        let osc2 = audioCtx.createOscillator();
+                        let gain = audioCtx.createGain();
+
+                        osc1.type = 'sawtooth';
+                        osc2.type = 'sine';
+
+                        osc1.frequency.setValueAtTime(880, start);
+                        osc2.frequency.setValueAtTime(1760, start);
+
+                        gain.gain.setValueAtTime(0.8, start);
+                        gain.gain.exponentialRampToValueAtTime(0.01, start + 0.3);
+
+                        osc1.connect(gain);
+                        osc2.connect(gain);
+                        gain.connect(audioCtx.destination);
+
+                        osc1.start(start);
+                        osc2.start(start);
+                        osc1.stop(start + 0.3);
+                        osc2.stop(start + 0.3);
+                    }}
                 }} catch(e) {{}}
             }}
 
             function enableNotifications() {{
+                if (!audioCtx) {{
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                }}
+                playLoudRing();
+
                 if ('Notification' in window) {{
                     Notification.requestPermission().then(permission => {{
                         if (permission === 'granted') {{
-                            alert("تم تفعيل الإشعارات والتنبيهات بنجاح! ستصلك تنبيهات ورنين الإدارة فوراً.");
-                            playSound();
+                            document.getElementById('notifBtn').style.background = '#38a169';
+                            document.getElementById('notifBtn').innerHTML = '✅ تم تفعيل الإشعارات العلوية والصوت بنجاح';
                         }}
                     }});
                 }}
             }}
 
-            // فحص تلقائي للسيرفر كل 10 ثوانٍ للتحقق من الرسائل الجديدة
+            // إرسال الإشعار للظهور بجانب الساعة في أعلى الشاشة
+            function triggerTopPushNotification(msgText) {{
+                if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {{
+                    navigator.serviceWorker.controller.postMessage({{
+                        type: 'SHOW_NOTIFICATION',
+                        title: 'معهد الهرمل الفني',
+                        body: 'رسالة جديدة من المدير: ' + msgText
+                    }});
+                }} else if ('Notification' in window && Notification.permission === 'granted') {{
+                    new Notification("معهد الهرمل الفني", {{
+                        body: "رسالة جديدة من المدير: " + msgText,
+                        icon: "{ICON_URL}",
+                        badge: "{ICON_URL}",
+                        vibrate: [500, 200, 500, 200, 500]
+                    }});
+                }}
+            }}
+
+            // فحص تلقائي للسيرفر كل 8 ثوانٍ لإرسال الإشعار العلوي وإطلاق الصوت
             setInterval(() => {{
                 fetch('/api/check_notifications')
                     .then(res => res.json())
                     .then(data => {{
                         if (data.count > currentNotifCount) {{
                             currentNotifCount = data.count;
-                            playSound();
+                            playLoudRing();
+                            triggerTopPushNotification(data.latest);
                             
-                            if (Notification.permission === 'granted') {{
-                                new Notification("معهد الهرمل الفني", {{
-                                    body: "إشعار جديد من المدير: " + data.latest,
-                                    icon: "{ICON_URL}"
-                                }});
-                            }}
-                            
-                            // تحديث الصفحة تلقائياً ليعرض الإشعار الجديد فوراً
-                            location.reload();
+                            setTimeout(() => {{
+                                location.reload();
+                            }}, 1500);
                         }}
                     }});
-            }}, 10000);
+            }}, 8000);
         </script>
     </body>
     </html>
