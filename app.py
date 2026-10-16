@@ -60,7 +60,8 @@ load_initial_teachers()
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-ICON_URL = "/uploads/logo.png"
+# رابط أيقونة ثابت ومباشر لضمان ظهورها فوراً
+ICON_URL = "https://cdn-icons-png.flaticon.com/512/3135/3135755.png"
 
 @app.route('/manifest.json')
 def manifest():
