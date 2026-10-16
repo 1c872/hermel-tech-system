@@ -463,57 +463,30 @@ def teacher_dashboard():
             button {{ background: #38a169; color: white; border: none; padding: 10px 15px; border-radius: 6px; font-weight: bold; cursor: pointer; }}
             .designer-tag {{ margin-top: 30px; color: #718096; font-size: 13px; font-weight: 500; text-align: center; border-top: 1px solid #cbd5e0; padding-top: 15px; }}
             
-            /* لوحة التنبيه التكنولوجية المستقبلية HUD */
-            #techOverlay {{
+            /* شريط التنبيه التقني المريح المدمج بدون إزعاج */
+            #smoothBanner {{
                 display: none;
-                position: fixed;
-                top: 0; left: 0; width: 100%; height: 100%;
-                background: rgba(15, 23, 42, 0.85);
-                backdrop-filter: blur(5px);
-                z-index: 99999;
-                justify-content: center;
-                align-items: center;
-                flex-direction: column;
+                background: linear-gradient(90deg, #1e3a8a, #2563eb);
                 color: white;
-                text-align: center;
-                padding: 20px;
-            }}
-            .tech-box {{
-                background: linear-gradient(135deg, #1e3a8a, #1e293b);
-                border: 2px solid #3b82f6;
-                box-shadow: 0 0 25px rgba(59, 130, 246, 0.6);
-                padding: 30px;
-                border-radius: 16px;
-                max-width: 400px;
-                width: 90%;
-                animation: techPulse 1.5s infinite alternate;
-            }}
-            @keyframes techPulse {{
-                from {{ box-shadow: 0 0 15px rgba(59, 130, 246, 0.4); }}
-                to {{ box-shadow: 0 0 30px rgba(59, 130, 246, 0.9); }}
+                padding: 12px 18px;
+                border-radius: 10px;
+                margin-top: 12px;
+                box-shadow: 0 4px 12px rgba(37,99,235,0.25);
+                font-size: 14px;
+                line-height: 1.5;
             }}
         </style>
     </head>
     <body>
-        <!-- لوحة التنبيه التكنولوجية العائمة -->
-        <div id="techOverlay">
-            <div class="tech-box">
-                <div style="font-size: 40px; margin-bottom: 10px;">⚡</div>
-                <h2 style="color: #60a5fa; margin-top: 0; font-size: 22px;">تنبيه نظام معهد الهرمل</h2>
-                <p style="font-size: 12px; color: #94a3b8; letter-spacing: 1px; margin-bottom: 15px;">SECURE ADMIN TRANSMISSION</p>
-                <p id="techMessage" style="font-size: 16px; font-weight: 500; margin-bottom: 25px; line-height: 1.6;"></p>
-                <button onclick="dismissTechAlert()" style="background: #2563eb; color: white; font-size: 15px; padding: 12px 25px; border-radius: 8px; border: none; font-weight: bold; cursor: pointer; width: 100%; box-shadow: 0 4px 12px rgba(37,99,235,0.4);">تأكيد الاطلاع والانتقال</button>
-            </div>
-        </div>
-
         <div class="navbar">
             <h3 style="margin:0;">معهد الهرمل الفني</h3>
             <span style="font-size:14px;">أهلاً بك أستاذ: {user_data.get('name')} | <a href="/logout" style="color:#feb2b2; text-decoration:none; font-weight:bold;">خروج</a></span>
         </div>
 
-        <button id="notifBtn" onclick="enableTechNotifications()" style="width:100%; margin-top:10px; background:#2563eb; color:white; padding:12px; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">
-            ⚡ انقر هنا مرة واحدة لتفعيل نظام التنبيهات الذكي والصوت التقني
-        </button>
+        <!-- شريط تنبيه أنيق وغير مزعج يظهر بالتدريج عند إضافة رسالة -->
+        <div id="smoothBanner">
+            ⚡ <b>رسالة جديدة من مدير المعهد:</b> <span id="bannerText"></span>
+        </div>
 
         {f'<div style="background:#c6f6d5; color:#22543d; padding:10px; border-radius:6px; margin-top:10px; font-weight:bold;">{msg}</div>' if msg else ''}
 
@@ -590,86 +563,47 @@ def teacher_dashboard():
         <script>
             let currentNotifCount = {initial_notif_count};
             let audioCtx = null;
-            let techInterval = null;
 
-            document.addEventListener("DOMContentLoaded", () => {{
-                if (localStorage.getItem('tech_notif_active') === 'true') {{
-                    const btn = document.getElementById('notifBtn');
-                    if (btn) btn.style.display = 'none';
-                }}
-            }});
-
-            // صوت تقني إلكتروني ذكي (Tech Beep نغمات رقمية)
-            function playTechTone() {{
+            // نغمة خفيفة وراقية لمرة واحدة فقط دون إزعاج
+            function playSubtleTone() {{
                 try {{
                     if (!audioCtx) {{
                         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                     }}
-                    let notes = [523.25, 659.25, 783.99, 1046.50]; // نغمات متسلسلة مستقبلية
-                    notes.forEach((freq, index) => {{
-                        let start = audioCtx.currentTime + (index * 0.12);
-                        let osc = audioCtx.createOscillator();
-                        let gain = audioCtx.createGain();
+                    let osc = audioCtx.createOscillator();
+                    let gain = audioCtx.createGain();
 
-                        osc.type = 'sine';
-                        osc.frequency.setValueAtTime(freq, start);
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(659.25, audioCtx.currentTime); // نغمة E5 هادئة
 
-                        gain.gain.setValueAtTime(0.4, start);
-                        gain.gain.exponentialRampToValueAtTime(0.001, start + 0.1);
+                    gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
 
-                        osc.connect(gain);
-                        gain.connect(audioCtx.destination);
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
 
-                        osc.start(start);
-                        osc.stop(start + 0.1);
-                    }});
+                    osc.start();
+                    osc.stop(audioCtx.currentTime + 0.3);
                 }} catch(e) {{}}
             }}
 
-            function triggerTechAlert(messageText) {{
-                document.getElementById('techMessage').innerText = messageText;
-                document.getElementById('techOverlay').style.display = 'flex';
-                
-                playTechTone();
-                if (!techInterval) {{
-                    techInterval = setInterval(() => {{
-                        playTechTone();
-                    }}, 2500);
-                }}
+            function triggerQuietAlert(messageText) {{
+                document.getElementById('bannerText').innerText = messageText;
+                document.getElementById('smoothBanner').style.display = 'block';
+                playSubtleTone();
             }}
 
-            function dismissTechAlert() {{
-                document.getElementById('techOverlay').style.display = 'none';
-                if (techInterval) {{
-                    clearInterval(techInterval);
-                    techInterval = null;
-                }}
-                location.reload();
-            }}
-
-            function enableTechNotifications() {{
-                if (!audioCtx) {{
-                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                }}
-                playTechTone();
-                
-                localStorage.setItem('tech_notif_active', 'true');
-                const btn = document.getElementById('notifBtn');
-                if (btn) btn.style.display = 'none';
-                alert("⚡ تم تفعيل نظام التنبيهات التقني بنجاح!");
-            }}
-
-            // فحص السيرفر كل 8 ثوانٍ لإظهار اللوحة التكنولوجية والصوت التقني فور إرسال المدير
+            // فحص السيرفر بشكل صامت كل 10 ثوانٍ
             setInterval(() => {{
                 fetch('/api/check_notifications')
                     .then(res => res.json())
                     .then(data => {{
                         if (data.count > currentNotifCount) {{
                             currentNotifCount = data.count;
-                            triggerTechAlert(data.latest);
+                            triggerQuietAlert(data.latest);
                         }}
                     }});
-            }}, 8000);
+            }}, 10000);
         </script>
     </body>
     </html>
