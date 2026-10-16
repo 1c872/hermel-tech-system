@@ -1,53 +1,10 @@
-from flask import Flask, render_template_string, request, redirect, url_for
+from flask import Flask
 
 app = Flask(__name__)
 
-# الصفحة الرئيسية - تعيد التوجيه لصفحة تسجيل الدخول
 @app.route('/')
 def home():
-    return redirect(url_for('login'))
+    return "مرحباً بك في المنصة الإلكترونية لـ معهد الهرمل الفني - النظام يعمل بنجاح!"
 
-# صفحة تسجيل الدخول الرسمية لمعهد الهرمل الفني
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-        if username == 'admin' and password == '123456':
-            return "<h2>أهلاً بك أستاذ محمد - تم الدخول بنجاح إلى لوحة إدارة معهد الهرمل الفني!</h2>"
-        else:
-            return "<h2>بيانات الدخول غير صحيحة، حاول مجدداً.</h2>"
-            
-    return '''
-    <!DOCTYPE html>
-    <html lang="ar" dir="rtl">
-    <head>
-        <meta charset="UTF-8">
-        <title>معهد الهرمل الفني - تسجيل الدخول</title>
-        <style>
-            body { font-family: sans-serif; background: #f4f6f9; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-            .card { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 100%; max-width: 350px; text-align: center; }
-            h2 { color: #1a365d; margin-bottom: 20px; }
-            input { width: 100%; padding: 10px; margin: 8px 0; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; }
-            button { width: 100%; padding: 10px; background: #2b6cb0; color: white; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; margin-top: 10px; }
-            button:hover { background: #2c5282; }
-        </style>
-    </head>
-    <body>
-        <div class="card">
-            <h2>معهد الهرمل الفني</h2>
-            <form method="POST">
-                <input type="text" name="username" placeholder="اسم المستخدم" required><br>
-                <input type="password" name="password" placeholder="كلمة المرور" required><br>
-                <button type="submit">تسجيل الدخول</button>
-            </form>
-        </div>
-    </body>
-    </html>
-    '''
-
-from app import app
-
-if __name__ == "__main__":
-    app.run()
-
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
