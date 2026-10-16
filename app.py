@@ -60,7 +60,6 @@ load_initial_teachers()
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# رابط صورة المبنى كأيقونة رسمية للتطبيق
 ICON_URL = "/uploads/logo.png"
 
 @app.route('/manifest.json')
@@ -152,20 +151,4 @@ def login():
             session['username'] = 'admin'
             session['role'] = 'admin'
             return redirect(url_for('admin_dashboard'))
-        elif username in teachers_db and teachers_db[username]['password'] == password:
-            session['username'] = username
-            session['role'] = 'teacher'
-            return redirect(url_for('teacher_dashboard'))
-        else:
-            error = 'اسم المستخدم أو كلمة المرور غير صحيحة'
-            
-    return f'''
-    <!DOCTYPE html>
-    <html lang="ar" dir="rtl">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>معهد الهرمل الفني - تسجيل الدخول</title>
-        {PWA_HEAD}
-        <style>
-            body {{ font-family: 'Segoe UI', Tahoma, sans-serif; background
+        elif username in
