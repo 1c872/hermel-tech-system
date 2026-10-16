@@ -81,6 +81,7 @@ def manifest():
         "orientation": "portrait"
     })
 
+# Service Worker المحدث لضمان بقاء الإشعار ثابتاً في شريط المهام العلوي بجانب الساعة
 @app.route('/sw.js')
 def service_worker():
     sw_code = f"""
@@ -97,9 +98,10 @@ def service_worker():
                 body: e.data.body,
                 icon: '{ICON_URL}',
                 badge: '{ICON_URL}',
-                vibrate: [500, 200, 500, 200, 500],
+                vibrate: [800, 300, 800, 300, 800],
                 requireInteraction: true,
-                tag: 'admin-msg'
+                tag: 'persistent-admin-msg',
+                renotify: true
             }});
         }}
     }});
@@ -564,7 +566,7 @@ def teacher_dashboard():
             let currentNotifCount = {initial_notif_count};
             let audioCtx = null;
 
-            // إخفاء الشريط البرتقالي تلقائياً إذا كان الأستاذ قد نُقر عليه مسبقاً
+            // إخفاء الشريط البرتقالي تلقائياً إذا كان الأستاذ قد فعله مسبقاً
             document.addEventListener("DOMContentLoaded", () => {{
                 if (localStorage.getItem('notif_enabled') === 'true') {{
                     const btn = document.getElementById('notifBtn');
@@ -610,7 +612,6 @@ def teacher_dashboard():
                 }}
                 playLoudRing();
                 
-                // حفظ خيار التفعيل في ذاكرة الهاتف لإخفاء الشريط البرتقالي في المرات القادمة
                 localStorage.setItem('notif_enabled', 'true');
                 const btn = document.getElementById('notifBtn');
                 if (btn) btn.style.display = 'none';
@@ -618,7 +619,7 @@ def teacher_dashboard():
                 if ('Notification' in window) {{
                     Notification.requestPermission().then(permission => {{
                         if (permission === 'granted') {{
-                            triggerTopPushNotification("تم تفعيل نظام التنبيهات بنجاح!");
+                            triggerTopPushNotification("تم تفعيل الإشعارات العلوية بنجاح!");
                         }}
                     }});
                 }}
@@ -636,7 +637,8 @@ def teacher_dashboard():
                         body: "رسالة جديدة من المدير: " + msgText,
                         icon: "{ICON_URL}",
                         badge: "{ICON_URL}",
-                        vibrate: [500, 200, 500, 200, 500]
+                        vibrate: [800, 300, 800, 300, 800],
+                        requireInteraction: true
                     }});
                 }}
             }}
