@@ -81,30 +81,15 @@ def manifest():
         "orientation": "portrait"
     })
 
-# Service Worker المحدث لضمان بقاء الإشعار ثابتاً في شريط المهام العلوي بجانب الساعة
 @app.route('/sw.js')
 def service_worker():
-    sw_code = f"""
-    self.addEventListener('install', (e) => {{
+    sw_code = """
+    self.addEventListener('install', (e) => {
         self.skipWaiting();
-    }});
-    self.addEventListener('activate', (e) => {{
+    });
+    self.addEventListener('activate', (e) => {
         e.waitUntil(self.clients.claim());
-    }});
-
-    self.addEventListener('message', (e) => {{
-        if (e.data && e.data.type === 'SHOW_NOTIFICATION') {{
-            self.registration.showNotification(e.data.title, {{
-                body: e.data.body,
-                icon: '{ICON_URL}',
-                badge: '{ICON_URL}',
-                vibrate: [800, 300, 800, 300, 800],
-                requireInteraction: true,
-                tag: 'persistent-admin-msg',
-                renotify: true
-            }});
-        }}
-    }});
+    });
     """
     return app.response_class(sw_code, mimetype='application/javascript')
 
@@ -468,8 +453,7 @@ def teacher_dashboard():
             .info-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 10px; }}
             .info-item {{ background: #edf2f7; padding: 10px 14px; border-radius: 8px; font-size: 13.5px; line-height: 1.6; }}
             .info-item b {{ color: #1a365d; }}
-            .notif-box {{ background: #ebf8ff; border-right: 4px solid #3182ce; color: #2b6cb0; padding: 12px; margin-bottom: 8px; border-radius: 6px; font-weight: bold; animation: pulse 1.5s infinite; }}
-            @keyframes pulse {{ 0% {{ opacity: 1; }} 50% {{ opacity: 0.6; }} 100% {{ opacity: 1; }} }}
+            .notif-box {{ background: #ebf8ff; border-right: 4px solid #3182ce; color: #2b6cb0; padding: 12px; margin-bottom: 8px; border-radius: 6px; font-weight: bold; }}
             .btn-pdf {{ display: inline-block; background: #2b6cb0; color: white; padding: 10px 15px; border-radius: 6px; text-decoration: none; font-weight: bold; }}
             table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
             th, td {{ border: 1px solid #e2e8f0; padding: 10px; text-align: center; font-size: 14px; }}
@@ -478,16 +462,57 @@ def teacher_dashboard():
             .sum-card {{ flex: 1; min-width: 150px; background: #f7fafc; border: 1.5px solid #cbd5e0; padding: 15px; border-radius: 8px; text-align: center; }}
             button {{ background: #38a169; color: white; border: none; padding: 10px 15px; border-radius: 6px; font-weight: bold; cursor: pointer; }}
             .designer-tag {{ margin-top: 30px; color: #718096; font-size: 13px; font-weight: 500; text-align: center; border-top: 1px solid #cbd5e0; padding-top: 15px; }}
+            
+            /* لوحة التنبيه التكنولوجية المستقبلية HUD */
+            #techOverlay {{
+                display: none;
+                position: fixed;
+                top: 0; left: 0; width: 100%; height: 100%;
+                background: rgba(15, 23, 42, 0.85);
+                backdrop-filter: blur(5px);
+                z-index: 99999;
+                justify-content: center;
+                align-items: center;
+                flex-direction: column;
+                color: white;
+                text-align: center;
+                padding: 20px;
+            }}
+            .tech-box {{
+                background: linear-gradient(135deg, #1e3a8a, #1e293b);
+                border: 2px solid #3b82f6;
+                box-shadow: 0 0 25px rgba(59, 130, 246, 0.6);
+                padding: 30px;
+                border-radius: 16px;
+                max-width: 400px;
+                width: 90%;
+                animation: techPulse 1.5s infinite alternate;
+            }}
+            @keyframes techPulse {{
+                from {{ box-shadow: 0 0 15px rgba(59, 130, 246, 0.4); }}
+                to {{ box-shadow: 0 0 30px rgba(59, 130, 246, 0.9); }}
+            }}
         </style>
     </head>
     <body>
+        <!-- لوحة التنبيه التكنولوجية العائمة -->
+        <div id="techOverlay">
+            <div class="tech-box">
+                <div style="font-size: 40px; margin-bottom: 10px;">⚡</div>
+                <h2 style="color: #60a5fa; margin-top: 0; font-size: 22px;">تنبيه نظام معهد الهرمل</h2>
+                <p style="font-size: 12px; color: #94a3b8; letter-spacing: 1px; margin-bottom: 15px;">SECURE ADMIN TRANSMISSION</p>
+                <p id="techMessage" style="font-size: 16px; font-weight: 500; margin-bottom: 25px; line-height: 1.6;"></p>
+                <button onclick="dismissTechAlert()" style="background: #2563eb; color: white; font-size: 15px; padding: 12px 25px; border-radius: 8px; border: none; font-weight: bold; cursor: pointer; width: 100%; box-shadow: 0 4px 12px rgba(37,99,235,0.4);">تأكيد الاطلاع والانتقال</button>
+            </div>
+        </div>
+
         <div class="navbar">
             <h3 style="margin:0;">معهد الهرمل الفني</h3>
             <span style="font-size:14px;">أهلاً بك أستاذ: {user_data.get('name')} | <a href="/logout" style="color:#feb2b2; text-decoration:none; font-weight:bold;">خروج</a></span>
         </div>
 
-        <button id="notifBtn" onclick="enableNotifications()" style="width:100%; margin-top:10px; background:#dd6b20; color:white; padding:12px; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">
-            🔔 انقر هنا مرة واحدة لتفعيل الإشعارات العلوية والصوت القوي
+        <button id="notifBtn" onclick="enableTechNotifications()" style="width:100%; margin-top:10px; background:#2563eb; color:white; padding:12px; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">
+            ⚡ انقر هنا مرة واحدة لتفعيل نظام التنبيهات الذكي والصوت التقني
         </button>
 
         {f'<div style="background:#c6f6d5; color:#22543d; padding:10px; border-radius:6px; margin-top:10px; font-weight:bold;">{msg}</div>' if msg else ''}
@@ -565,96 +590,83 @@ def teacher_dashboard():
         <script>
             let currentNotifCount = {initial_notif_count};
             let audioCtx = null;
+            let techInterval = null;
 
-            // إخفاء الشريط البرتقالي تلقائياً إذا كان الأستاذ قد فعله مسبقاً
             document.addEventListener("DOMContentLoaded", () => {{
-                if (localStorage.getItem('notif_enabled') === 'true') {{
+                if (localStorage.getItem('tech_notif_active') === 'true') {{
                     const btn = document.getElementById('notifBtn');
                     if (btn) btn.style.display = 'none';
                 }}
             }});
 
-            function playLoudRing() {{
+            // صوت تقني إلكتروني ذكي (Tech Beep نغمات رقمية)
+            function playTechTone() {{
                 try {{
                     if (!audioCtx) {{
                         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                     }}
-                    for (let i = 0; i < 3; i++) {{
-                        let start = audioCtx.currentTime + (i * 0.4);
-                        let osc1 = audioCtx.createOscillator();
-                        let osc2 = audioCtx.createOscillator();
+                    let notes = [523.25, 659.25, 783.99, 1046.50]; // نغمات متسلسلة مستقبلية
+                    notes.forEach((freq, index) => {{
+                        let start = audioCtx.currentTime + (index * 0.12);
+                        let osc = audioCtx.createOscillator();
                         let gain = audioCtx.createGain();
 
-                        osc1.type = 'sawtooth';
-                        osc2.type = 'sine';
+                        osc.type = 'sine';
+                        osc.frequency.setValueAtTime(freq, start);
 
-                        osc1.frequency.setValueAtTime(880, start);
-                        osc2.frequency.setValueAtTime(1760, start);
+                        gain.gain.setValueAtTime(0.4, start);
+                        gain.gain.exponentialRampToValueAtTime(0.001, start + 0.1);
 
-                        gain.gain.setValueAtTime(0.8, start);
-                        gain.gain.exponentialRampToValueAtTime(0.01, start + 0.3);
-
-                        osc1.connect(gain);
-                        osc2.connect(gain);
+                        osc.connect(gain);
                         gain.connect(audioCtx.destination);
 
-                        osc1.start(start);
-                        osc2.start(start);
-                        osc1.stop(start + 0.3);
-                        osc2.stop(start + 0.3);
-                    }}
+                        osc.start(start);
+                        osc.stop(start + 0.1);
+                    }});
                 }} catch(e) {{}}
             }}
 
-            function enableNotifications() {{
+            function triggerTechAlert(messageText) {{
+                document.getElementById('techMessage').innerText = messageText;
+                document.getElementById('techOverlay').style.display = 'flex';
+                
+                playTechTone();
+                if (!techInterval) {{
+                    techInterval = setInterval(() => {{
+                        playTechTone();
+                    }}, 2500);
+                }}
+            }}
+
+            function dismissTechAlert() {{
+                document.getElementById('techOverlay').style.display = 'none';
+                if (techInterval) {{
+                    clearInterval(techInterval);
+                    techInterval = null;
+                }}
+                location.reload();
+            }}
+
+            function enableTechNotifications() {{
                 if (!audioCtx) {{
                     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                 }}
-                playLoudRing();
+                playTechTone();
                 
-                localStorage.setItem('notif_enabled', 'true');
+                localStorage.setItem('tech_notif_active', 'true');
                 const btn = document.getElementById('notifBtn');
                 if (btn) btn.style.display = 'none';
-
-                if ('Notification' in window) {{
-                    Notification.requestPermission().then(permission => {{
-                        if (permission === 'granted') {{
-                            triggerTopPushNotification("تم تفعيل الإشعارات العلوية بنجاح!");
-                        }}
-                    }});
-                }}
+                alert("⚡ تم تفعيل نظام التنبيهات التقني بنجاح!");
             }}
 
-            function triggerTopPushNotification(msgText) {{
-                if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {{
-                    navigator.serviceWorker.controller.postMessage({{
-                        type: 'SHOW_NOTIFICATION',
-                        title: 'معهد الهرمل الفني',
-                        body: 'رسالة جديدة من المدير: ' + msgText
-                    }});
-                }} else if ('Notification' in window && Notification.permission === 'granted') {{
-                    new Notification("معهد الهرمل الفني", {{
-                        body: "رسالة جديدة من المدير: " + msgText,
-                        icon: "{ICON_URL}",
-                        badge: "{ICON_URL}",
-                        vibrate: [800, 300, 800, 300, 800],
-                        requireInteraction: true
-                    }});
-                }}
-            }}
-
+            // فحص السيرفر كل 8 ثوانٍ لإظهار اللوحة التكنولوجية والصوت التقني فور إرسال المدير
             setInterval(() => {{
                 fetch('/api/check_notifications')
                     .then(res => res.json())
                     .then(data => {{
                         if (data.count > currentNotifCount) {{
                             currentNotifCount = data.count;
-                            playLoudRing();
-                            triggerTopPushNotification(data.latest);
-                            
-                            setTimeout(() => {{
-                                location.reload();
-                            }}, 1500);
+                            triggerTechAlert(data.latest);
                         }}
                     }});
             }}, 8000);
