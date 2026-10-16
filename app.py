@@ -21,7 +21,6 @@ try:
         name = str(row.get('الاسم الثلاثي', f'أستاذ_{index}')).strip()
         if not name or name == 'nan':
             continue
-        # توليد اسم مستخدم فريد لكل أستاذ من ملف الإكسل
         username = f"teacher_{index+1}"
         password = str(int(row.get('الرقم الآلي', 123456))) if pd.notna(row.get('الرقم الآلي')) else "123456"
         subject = str(row.get('الوضع الوظيفي', 'استاذ تعليم فني'))
@@ -38,11 +37,10 @@ try:
             'schedule_pdf': None,
             'notifications': [],
             'attendance_logs': [],
-            'absence_requests': [], # طلبات التغيب المسبق مع التقرير الطبي
+            'absence_requests': [],
             'uploaded_images': []
         }
 except Exception as e:
-    # حساب احتياطي في حال لم يتم العثور على الملف مؤقتاً
     teachers_db = {
         'mohammed': {
             'password': '1234',
@@ -60,7 +58,6 @@ except Exception as e:
         }
     }
 
-# إضافة حساب المدير الرئيسي
 teachers_db['admin'] = {
     'password': 'admin_secure_password',
     'name': 'مدير المعهد',
@@ -145,7 +142,6 @@ def admin_dashboard():
     if request.method == 'POST':
         action = request.form.get('action')
         
-        # إضافة أستاذ جديد وتوليد بيانات عشوائية
         if action == 'add_teacher':
             name = request.form.get('name').strip()
             subject = request.form.get('subject').strip()
@@ -168,7 +164,6 @@ def admin_dashboard():
             }
             msg = f"تم إضافة الأستاذ بنجاح! اسم المستخدم: ({username}) | كلمة المرور: ({generated_pwd})"
 
-        # تعديل بيانات أستاذ
         elif action == 'edit_teacher':
             target_user = request.form.get('target_user')
             if target_user in teachers_db:
@@ -180,7 +175,6 @@ def admin_dashboard():
                 if new_pass: teachers_db[target_user]['password'] = new_pass
                 msg = "تم تعديل بيانات الأستاذ بنجاح."
 
-        # إرسال تنبيه
         elif action == 'send_notification':
             target_user = request.form.get('target_user')
             notif = request.form.get('notification_text')
@@ -188,7 +182,6 @@ def admin_dashboard():
                 teachers_db[target_user]['notifications'].append(notif)
                 msg = "تم إرسال الإشعار بنجاح."
 
-        # رفع PDF
         elif action == 'upload_pdf':
             target_user = request.form.get('target_user')
             file = request.files.get('pdf_file')
@@ -203,8 +196,12 @@ def admin_dashboard():
         if username == 'admin': continue
         pdf_status = f"<a href='/uploads/{t['schedule_pdf']}' target='_blank'>📄 عرض PDF</a>" if t['schedule_pdf'] else "غير مرفوع"
         
-        # طلبات الغياب المسبق والتقارير الطبية الواردة من الأستاذ
-        abs_reqs = [f"<b>{req['date']}:</b> {req['reason']} - <span style='color:#2b6cb0;'>التقرير: {f'<a href=\"/uploads/{req[\"report\"]}\" target=\"_blank\">مرفق طبى</a>' if req['report'] else 'بدون'}</span>" for req in t['absence_requests']]
+        # تصحيح الـ f-string للطلب والتقرير الطبي
+        abs_reqs = []
+        for req in t['absence_requests']:
+            rep_link = f"<a href='/uploads/{req['report']}' target='_blank'>مرفق طبي</a>" if req['report'] else "بدون"
+            abs_reqs.append(f"<b>{req['date']}:</b> {req['reason']} - <span style='color:#2b6cb0;'>التقرير: {rep_link}</span>")
+        
         abs_str = "<br>".join(abs_reqs) if abs_reqs else "لا يوجد طلبات تغيب"
 
         rows += f"""
@@ -325,7 +322,6 @@ def teacher_dashboard():
     if request.method == 'POST':
         action = request.form.get('action')
         
-        # طلب تغيب مسبق مع تقرير طبي
         if action == 'request_absence':
             abs_date = request.form.get('absence_date')
             reason = request.form.get('absence_reason')
@@ -342,7 +338,6 @@ def teacher_dashboard():
             })
             msg = "تم إرسال طلب التغيب المسبق والتقرير الطبي للإدارة بنجاح!"
 
-        # رفع صورة نشاط
         elif action == 'upload_image':
             file = request.files.get('image_file')
             if file and allowed_file(file.filename):
@@ -355,7 +350,11 @@ def teacher_dashboard():
     pdf_html = f"<a href='/uploads/{user_data['schedule_pdf']}' class='btn-pdf' target='_blank'>📄 فتح/تحميل جدول الحصص الأسبوعي PDF</a>" if user_data['schedule_pdf'] else "لم يتم رفع جدول الحصص بعد."
     imgs_html = "".join([f"<img src='/uploads/{img}' class='preview-img'>" for img in user_data['uploaded_images']])
     
-    abs_list = "".join([f"<li><b>{req['date']}:</b> {req['reason']} {f'(<a href=\"/uploads/{req[\"report\"]}\" target=\"_blank\">عرض التقرير الطبي المرفق</a>)' if req['report'] else ''}</li>" for req in user_data['absence_requests']])
+    abs_requests_list = []
+    for req in user_data['absence_requests']:
+        rep_link = f"(<a href='/uploads/{req['report']}' target='_blank'>عرض التقرير الطبي المرفق</a>)" if req['report'] else ""
+        abs_requests_list.append(f"<li><b>{req['date']}:</b> {req['reason']} {rep_link}</li>")
+    abs_list = "".join(abs_requests_list)
 
     return f'''
     <!DOCTYPE html>
