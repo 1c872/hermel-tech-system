@@ -16,6 +16,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 teachers_db = {}
 admin_replies = []
+admin_credentials = {'username': 'admin', 'password': '123456'}
 
 def load_initial_teachers():
     global teachers_db
@@ -107,7 +108,7 @@ def download_template():
     if session.get('role') != 'admin':
         return redirect(url_for('login'))
         
-    names = [t['name'] for u, t in teachers_db.items() if u != 'admin']
+    names = [t['name'] for u, t in teachers_db.items()]
     df_template = pd.DataFrame({
         'الاسم الثلاثي': names,
         'عدد الحصص': [0] * len(names),
@@ -116,7 +117,7 @@ def download_template():
     
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df_template.to_excel(writer, index=False, sheet_name='الحصص والنقل الشهري')
+        df_template.to_excel(output, index=False, sheet_name='الحصص والنقل الشهري')
     output.seek(0)
     
     return send_file(
@@ -130,6 +131,12 @@ def download_template():
 def delete_reply(reply_id):
     if session.get('role') == 'admin' and 0 <= reply_id < len(admin_replies):
         admin_replies.pop(reply_id)
+    return redirect(url_for('admin_dashboard'))
+
+@app.route('/admin/delete_teacher/<username>', methods=['POST'])
+def delete_teacher(username):
+    if session.get('role') == 'admin' and username in teachers_db:
+        del teachers_db[username]
     return redirect(url_for('admin_dashboard'))
 
 PWA_HEAD = f'''
@@ -156,7 +163,7 @@ def login():
         username = request.form.get('username').strip().lower()
         password = request.form.get('password').strip()
         
-        if username == 'admin' and password == '123456':
+        if username == admin_credentials['username'] and password == admin_credentials['password']:
             session['username'] = 'admin'
             session['role'] = 'admin'
             return redirect(url_for('admin_dashboard'))
@@ -210,7 +217,15 @@ def admin_dashboard():
     if request.method == 'POST':
         action = request.form.get('action')
         
-        if action == 'upload_monthly_excel':
+        if action == 'change_admin_password':
+            new_pass = request.form.get('new_password').strip()
+            if new_pass:
+                admin_credentials['password'] = new_pass
+                msg = "تم تغيير كلمة مرور الإدارة بنجاح!"
+            else:
+                msg = "يرجى إدخال كلمة مرور صحيحة."
+
+        elif action == 'upload_monthly_excel':
             month_name = request.form.get('month_name')
             file = request.files.get('monthly_excel')
             if file and allowed_file(file.filename):
@@ -247,9 +262,8 @@ def admin_dashboard():
             if target_user == 'all':
                 count = 0
                 for u, t_data in teachers_db.items():
-                    if u != 'admin':
-                        t_data['notifications'].append(f"📢 تعميم إداري: {notif}")
-                        count += 1
+                    t_data['notifications'].append(f"📢 تعميم إداري: {notif}")
+                    count += 1
                 msg = f"تم إرسال التعميم بنجاح لجميع الأساتذة (عدد {count})!"
             elif target_user in teachers_db and notif:
                 teachers_db[target_user]['notifications'].append(notif)
@@ -285,7 +299,6 @@ def admin_dashboard():
 
     rows = ""
     for username, t in teachers_db.items():
-        if username == 'admin': continue
         pdf_status = f"<a href='/uploads/{t['schedule_pdf']}' target='_blank'>📄 عرض PDF</a>" if t['schedule_pdf'] else "غير مرفوع"
         
         m_data_list = []
@@ -303,17 +316,16 @@ def admin_dashboard():
             <td><b>{t['contract_hours']} ساعة</b></td>
             <td style="background:#f7fafc; color:#2b6cb0; font-size:12px;">{m_str}</td>
             <td>{pdf_status}</td>
+            <td>
+                <form method="POST" action="/admin/delete_teacher/{username}" onsubmit="return confirm('هل أنت متأكد من حذف الأستاذ {t['name']} (تقاعد/استقالة)؟');" style="margin:0;">
+                    <button type="submit" style="background:#e53e3e; color:white; border:none; padding:6px 10px; border-radius:4px; font-size:12px; cursor:pointer;">🗑️ حذف</button>
+                </form>
+            </td>
         </tr>
         """
 
-    # تجهيز قائمة الأساتذة للاستخدام في محرك البحث التفاعلي (JavaScript Array)
-    teachers_json_list = [{"username": "all", "name": "📢 إرسال لجميع الأساتذة (تعميم عام)", "subject": "الجميع"}]
-    for u, t in teachers_db.items():
-        if u != 'admin':
-            teachers_json_list.append({"username": u, "name": t['name'], "subject": t['subject']})
-
-    import json
-    teachers_json_str = json.dumps(teachers_json_list, ensure_ascii=False)
+    active_teachers_opts = '<option value="all" style="background:#2b6cb0; color:white; font-weight:bold;">📢 إرسال لجميع الأساتذة (تعميم عام)</option>'
+    active_teachers_opts += "".join([f'<option value="{u}">{t["name"]} ({t["subject"]})</option>' for u,t in teachers_db.items()])
 
     return f'''
     <!DOCTYPE html>
@@ -337,7 +349,6 @@ def admin_dashboard():
             .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; }}
             .designer-tag {{ margin-top: 30px; color: #718096; font-size: 13px; font-weight: 500; text-align: center; border-top: 1px solid #cbd5e0; padding-top: 15px; }}
             
-            /* تصميم قائمة الاقتراحات التفاعلية (Autocomplete Dropdown) */
             .autocomplete-container {{ position: relative; width: 100%; }}
             #suggestionsList {{
                 position: absolute;
@@ -374,6 +385,15 @@ def admin_dashboard():
 
         {f'<div class="msg">{msg}</div>' if msg else ''}
 
+        <div class="card" style="border-top: 4px solid #805ad5;">
+            <h4 style="margin-top:0; color:#553c9a;">🔑 تغيير كلمة مرور الإدارة:</h4>
+            <form method="POST">
+                <input type="hidden" name="action" value="change_admin_password">
+                <input type="password" name="new_password" placeholder="كلمة المرور الإدارية الجديدة" required>
+                <button type="submit" style="background:#805ad5;">تحديث كلمة المرور</button>
+            </form>
+        </div>
+
         <div class="card" style="border-top: 4px solid #dd6b20;">
             <h3 style="margin-top:0; color:#c05621;">📥 إجابات ورسائل الأساتذة الواردة:</h3>
             {replies_html}
@@ -397,15 +417,12 @@ def admin_dashboard():
                 <form method="POST">
                     <input type="hidden" name="action" value="send_notification">
                     
-                    <!-- حقل البحث التفاعلي التلقائي -->
                     <label style="font-size:12px; color:#4a5568; font-weight:bold;">🔍 اكتب اسم الأستاذ للبحث الفوري:</label>
                     <div class="autocomplete-container">
                         <input type="text" id="teacherSearchBox" placeholder="اكتب للبحث عن الاسم..." oninput="onSearchInput()" autocomplete="off" style="margin:0;">
-                        <!-- القائمة المنسدلة الذكية التي تظهر النتائج عند الكتابة -->
                         <div id="suggestionsList"></div>
                     </div>
                     
-                    <!-- الحقل المخفي الذي يحمل الـ username الفعلي لإرساله للسيرفر -->
                     <input type="hidden" name="target_user" id="selectedTeacherUsername" value="all" required>
                     
                     <div id="selectedTeacherDisplay" style="background:#edf2f7; padding:8px; border-radius:6px; font-size:13px; color:#2b6cb0; font-weight:bold; text-align:center;">
@@ -423,7 +440,7 @@ def admin_dashboard():
                 <form method="POST" enctype="multipart/form-data">
                     <input type="hidden" name="action" value="upload_pdf">
                     <select name="target_user" required>
-                        {''.join([f'<option value="{u}">{t["name"]} ({t["subject"]})</option>' for u,t in teachers_db.items() if u != 'admin'])}
+                        {''.join([f'<option value="{u}">{t["name"]} ({t["subject"]})</option>' for u,t in teachers_db.items()])}
                     </select>
                     <input type="file" name="pdf_file" accept=".pdf" required>
                     <button type="submit" style="background:#4a5568;">رفع ملف PDF</button>
@@ -439,6 +456,7 @@ def admin_dashboard():
                     <th>العقود</th>
                     <th>الحصص وأيام النقل الشهرية</th>
                     <th>جدول PDF</th>
+                    <th>إدارة (تقاعد/حذف)</th>
                 </tr>
                 {rows}
             </table>
@@ -447,9 +465,11 @@ def admin_dashboard():
         <div class="designer-tag">🛠️ تم تصميم وتطوير البرنامج من قبل الأستاذ محمد حسين شمص</div>
 
         <script>
-            const allTeachers = {teachers_json_str};
+            const allTeachers = [
+                {{"username": "all", "name": "📢 إرسال لجميع الأساتذة (تعميم عام)", "subject": "الجميع"}},
+                {','.join([f'{{"username": "{u}", "name": "{t["name"]}", "subject": "{t["subject"]}"}}' for u, t in teachers_db.items()])}
+            ];
 
-            // دالة تصفية وعرض الأسماء فور البدء بالكتابة
             function onSearchInput() {{
                 let query = document.getElementById('teacherSearchBox').value.trim().toLowerCase();
                 let listDiv = document.getElementById('suggestionsList');
@@ -457,6 +477,8 @@ def admin_dashboard():
 
                 if (query === '') {{
                     listDiv.style.display = 'none';
+                    document.getElementById('selectedTeacherUsername').value = 'all';
+                    document.getElementById('selectedTeacherDisplay').innerText = "🎯 المستهدف حالياً: إرسال لجميع الأساتذة (تعميم عام)";
                     return;
                 }}
 
@@ -483,7 +505,6 @@ def admin_dashboard():
                 listDiv.style.display = 'block';
             }}
 
-            // إخفاء القائمة عند النقر خارجها
             document.addEventListener('click', function(e) {{
                 if (!e.target.closest('.autocomplete-container')) {{
                     document.getElementById('suggestionsList').style.display = 'none';
@@ -718,7 +739,7 @@ def uploaded_file(filename):
 @app.route('/logout')
 def logout():
     session.clear()
-    return redirect(url_for('login'))
+    return redirect(url_for('logout'))
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
