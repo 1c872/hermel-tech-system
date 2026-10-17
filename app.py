@@ -3,6 +3,7 @@ import json
 import random
 import string
 import io
+import math
 import pandas as pd
 from datetime import datetime
 from flask import Flask, render_template_string, request, redirect, url_for, session, send_from_directory, send_file, jsonify
@@ -29,6 +30,29 @@ current_academic_year = "2026-2027"
 # 2. قواعد بيانات الطلاب والجلسات الميدانية
 students_db = []
 field_sessions = []
+
+# 3. قاعدة بيانات مواقع التدريب الميداني وإحداثيات الـ GPS ونطاق الأمان (بالأمتار)
+TRAINING_LOCATIONS = {
+    "مستشفى الهرمل الحكومي": {"lat": 34.381283, "lng": 36.424456, "radius_meters": 300},
+    "مستشفى البتول": {"lat": 34.381283, "lng": 36.424456, "radius_meters": 300},
+    "مستشفى دار الكرامة": {"lat": 34.403492, "lng": 36.396789, "radius_meters": 250},
+    "مستشفى العاصي": {"lat": 34.398330, "lng": 36.406490, "radius_meters": 250},
+    "مدرسة سانرايز": {"lat": 34.403492, "lng": 36.396789, "radius_meters": 200},
+    "ثانوية الرشاد": {"lat": 34.403826, "lng": 36.391736, "radius_meters": 200},
+    "مدرسة الإمام علي": {"lat": 34.395518, "lng": 36.386411, "radius_meters": 200}
+}
+
+def calculate_distance(lat1, lon1, lat2, lon2):
+    """حساب المسافة بالمتر بين نقطتين جغرافيتين باستخدام معادلة Haversine"""
+    R = 6371000  # نصف قطر الأرض بالمتر
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+
+    a = math.sin(delta_phi / 2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
 
 def save_to_disk():
     """حفظ قاعدة البيانات الكاملة في ملف JSON دائم"""
@@ -221,9 +245,6 @@ def login():
     </html>
     '''
 
-# -------------------------------------------------------------
-# مسارات الأعوام الدراسية ورفع طلاب الإكسل وتكليف التدريب الميداني
-# -------------------------------------------------------------
 @app.route('/admin/add_year', methods=['POST'])
 def add_academic_year():
     if session.get('role') != 'admin': return redirect(url_for('login'))
@@ -339,9 +360,6 @@ def delete_teacher(username):
         save_to_disk()
     return redirect(url_for('admin_dashboard'))
 
-# -------------------------------------------------------------
-# لوحة تحكم الإدارة الكاملة
-# -------------------------------------------------------------
 @app.route('/admin', methods=['GET', 'POST'])
 def admin_dashboard():
     if session.get('role') != 'admin': return redirect(url_for('login'))
@@ -466,6 +484,7 @@ def admin_dashboard():
 
     years_options = "".join([f"<option value='{y}' {'selected' if y==current_academic_year else ''}>{y}</option>" for y in academic_years_db])
     teachers_options = "".join([f"<option value='{t['name']}'>{t['name']}</option>" for u, t in teachers_db.items()])
+    locations_options = "".join([f"<option value='{loc}'>{loc}</option>" for loc in TRAINING_LOCATIONS.keys()])
 
     return f'''
     <!DOCTYPE html>
@@ -535,8 +554,10 @@ def admin_dashboard():
             <h3 style="margin-top:0; color:#553c9a;">🏥 إضافة جلسة تدريب ميداني (مستشفيات / مدارس):</h3>
             <form action="/admin/create_field_session" method="POST" class="grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
                 <div>
-                    <label style="font-size:12px;">المكان:</label>
-                    <input type="text" name="location" placeholder="مستشفى الهرمل الحكومي" required style="width:100%;">
+                    <label style="font-size:12px;">المكان المعتمد:</label>
+                    <select name="location" required style="width:100%;">
+                        {locations_options}
+                    </select>
                 </div>
                 <div>
                     <label style="font-size:12px;">الصف:</label>
@@ -717,9 +738,6 @@ def admin_dashboard():
     </html>
     '''
 
-# -------------------------------------------------------------
-# صفحة الأستاذ مع حماية الـ GPS وتأكيد غياب التدريب الميداني
-# -------------------------------------------------------------
 @app.route('/teacher', methods=['GET', 'POST'])
 def teacher_dashboard():
     if session.get('role') != 'teacher': return redirect(url_for('login'))
@@ -752,7 +770,6 @@ def teacher_dashboard():
     notifs_html = "".join([f"<div class='notif-box'>🔔 <b>إشعار/تعميم:</b> {n}</div>" for n in notifs_list])
     pdf_html = f"<a href='/uploads/{user_data['schedule_pdf']}' class='btn-pdf' target='_blank'>📄 فتح/تحميل جدول الحصص PDF</a>" if user_data.get('schedule_pdf') else "لم يتم رفع جدول الحصص بعد."
     
-    # جلب الجلسات الميدانية المكلف بها الأستاذ للعام الدراسي النشط
     my_sessions = [s for s in field_sessions if s.get('academic_year') == current_academic_year and (s['primary_teacher'] == t_name or s['secondary_teacher'] == t_name)]
     
     sessions_html = ""
@@ -781,7 +798,7 @@ def teacher_dashboard():
                 <ul style="list-style:none; padding:0; max-height:200px; overflow-y:auto; background:white; border:1px solid #cbd5e0; border-radius:6px; margin-bottom:10px;">
                     {students_list_html}
                 </ul>
-                <button type="button" onclick="submitAttendance({s['id']}, '{t_name}')" style="background:#38a169; color:white; border:none; padding:10px; width:100%; border-radius:6px; font-weight:bold; cursor:pointer;">إرسال غياب الطلاب للإدارة عبر الـ GPS</button>
+                <button type="button" onclick="submitAttendance({s['id']}, '{t_name}', '{s['location']}')" style="background:#38a169; color:white; border:none; padding:10px; width:100%; border-radius:6px; font-weight:bold; cursor:pointer;">إرسال غياب الطلاب للإدارة عبر التحقق الجغرافي GPS</button>
             </div>
             '''
         else:
@@ -938,7 +955,7 @@ def teacher_dashboard():
                 }}, 50);
             }}
 
-            function submitAttendance(sessionId, teacherName) {{
+            function submitAttendance(sessionId, teacherName, locationName) {{
                 if (!navigator.geolocation) {{
                     alert("متصفحك لا يدعم تحديد الموقع الجغرافي GPS");
                     return;
@@ -959,6 +976,7 @@ def teacher_dashboard():
                         body: JSON.stringify({{
                             session_id: sessionId,
                             sender_name: teacherName,
+                            location: locationName,
                             attendance: attendance,
                             lat: position.coords.latitude,
                             lng: position.coords.longitude
@@ -971,7 +989,7 @@ def teacher_dashboard():
                     }})
                     .catch(err => alert("حدث خطأ أثناء الاتصال."));
                 }}, function(error) {{
-                    alert("يجب تفعيل خدمة الـ GPS على هاتفك لتتمكن من إرسال الحضور وتأكيد تواجيدك بالمستشفى/المدرسة.");
+                    alert("يجب تفعيل خدمة الـ GPS على هاتفك لتتمكن من إرسال الحضور وتأكيد تواجدك بالمستشفى/المدرسة.");
                 }}, {{ enableHighAccuracy: true }});
             }}
 
@@ -1021,7 +1039,20 @@ def submit_field_attendance():
     data = request.json
     session_id = int(data.get('session_id'))
     sender_name = data.get('sender_name')
+    location_name = data.get('location')
     attendance = data.get('attendance')
+    user_lat = float(data.get('lat'))
+    user_lng = float(data.get('lng'))
+
+    # التحقق من الإحداثيات الجغرافية (Geofencing)
+    if location_name in TRAINING_LOCATIONS:
+        loc_data = TRAINING_LOCATIONS[location_name]
+        distance = calculate_distance(user_lat, user_lng, loc_data['lat'], loc_data['lng'])
+        if distance > loc_data['radius_meters']:
+            return jsonify({
+                "success": False, 
+                "message": f"عذراً! أنت خارج نطاق موقع ({location_name}). المسافة الحالية عن الموقع هي {int(distance)} متر بينما النطاق المسموح هو {loc_data['radius_meters']} متر."
+            }), 400
 
     session_item = next((s for s in field_sessions if s['id'] == session_id), None)
     if session_item:
@@ -1032,7 +1063,7 @@ def submit_field_attendance():
         session_item['submitted_by'] = sender_name
         session_item['status'] = "مكتملة"
         save_to_disk()
-        return jsonify({"success": True, "message": "تم التحقق بالـ GPS وحفظ حضور الطلاب وإرساله لمدير المعهد بنجاح!"})
+        return jsonify({"success": True, "message": "تم التحقق الجغرافي بالـ GPS بنجاح وحفظ حضور الطلاب وإرساله لمدير المعهد!"})
     
     return jsonify({"success": False, "message": "الجلسة غير متوفرة"}), 400
 
