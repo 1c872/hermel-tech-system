@@ -1,11 +1,7 @@
 import os
 import json
-import random
-import string
 import io
-import math
 import pandas as pd
-from datetime import datetime
 from flask import Flask, render_template_string, request, redirect, url_for, session, send_from_directory, send_file, jsonify
 from werkzeug.utils import secure_filename
 
@@ -19,53 +15,21 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 DB_FILE = 'database.json'
 
+# قواعد البيانات المحفوظة
 teachers_db = {}
+grades_db = {}        # { "student_name_subject": grade }
+attendance_db = {}    # { "class_date": [absent_students] }
 admin_replies = []
 admin_credentials = {'username': 'admin', 'password': '123456'}
-
-# 1. نظام الأعوام الدراسية الممتدة
-academic_years_db = ["2025-2026", "2026-2027", "2027-2028", "2028-2029"]
-current_academic_year = "2026-2027"
-
-# 2. قواعد البيانات الأساسية
-students_db = []
-field_sessions = []
-grades_db = []
-teacher_assignments = [] # جدول توزيع المواد: {academic_year, teacher_name, class_name, major, subject}
-
-# 3. قاعدة بيانات مواقع التدريب الميداني وإحداثيات الـ GPS ونطاق الأمان (بالأمتار)
-TRAINING_LOCATIONS = {
-    "مستشفى الهرمل الحكومي": {"lat": 34.381283, "lng": 36.424456, "radius_meters": 300},
-    "مستشفى البتول": {"lat": 34.381283, "lng": 36.424456, "radius_meters": 300},
-    "مستشفى دار الكرامة": {"lat": 34.403492, "lng": 36.396789, "radius_meters": 250},
-    "مستشفى العاصي": {"lat": 34.398330, "lng": 36.406490, "radius_meters": 250},
-    "مدرسة سانرايز": {"lat": 34.403492, "lng": 36.396789, "radius_meters": 200},
-    "ثانوية الرشاد": {"lat": 34.403826, "lng": 36.391736, "radius_meters": 200},
-    "مدرسة الإمام علي": {"lat": 34.395518, "lng": 36.386411, "radius_meters": 200}
-}
-
-def calculate_distance(lat1, lon1, lat2, lon2):
-    R = 6371000
-    phi1 = math.radians(lat1)
-    phi2 = math.radians(lat2)
-    delta_phi = math.radians(lat2 - lat1)
-    delta_lambda = math.radians(lon2 - lon1)
-    a = math.sin(delta_phi / 2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2)**2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return R * c
 
 def save_to_disk():
     try:
         data = {
             'teachers_db': teachers_db,
-            'admin_replies': admin_replies,
-            'admin_credentials': admin_credentials,
-            'academic_years_db': academic_years_db,
-            'current_academic_year': current_academic_year,
-            'students_db': students_db,
-            'field_sessions': field_sessions,
             'grades_db': grades_db,
-            'teacher_assignments': teacher_assignments
+            'attendance_db': attendance_db,
+            'admin_replies': admin_replies,
+            'admin_credentials': admin_credentials
         }
         with open(DB_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -73,35 +37,26 @@ def save_to_disk():
         print(f"Error saving database: {e}")
 
 def load_from_disk():
-    global teachers_db, admin_replies, admin_credentials, academic_years_db, current_academic_year, students_db, field_sessions, grades_db, teacher_assignments
+    global teachers_db, grades_db, attendance_db, admin_replies, admin_credentials
     if os.path.exists(DB_FILE):
         try:
             with open(DB_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 teachers_db = data.get('teachers_db', {})
+                grades_db = data.get('grades_db', {})
+                attendance_db = data.get('attendance_db', {})
                 admin_replies = data.get('admin_replies', [])
                 admin_credentials = data.get('admin_credentials', {'username': 'admin', 'password': '123456'})
-                academic_years_db = data.get('academic_years_db', ["2025-2026", "2026-2027", "2027-2028"])
-                current_academic_year = data.get('current_academic_year', "2026-2027")
-                students_db = data.get('students_db', [])
-                field_sessions = data.get('field_sessions', [])
-                grades_db = data.get('grades_db', [])
-                teacher_assignments = data.get('teacher_assignments', [])
                 return True
         except Exception as e:
             print(f"Error loading database file: {e}")
     return False
 
-def initialize_system():
+def load_initial_teachers():
     global teachers_db
     if load_from_disk():
-        if not teachers_db:
-            load_initial_teachers_from_excel()
         return
-    load_initial_teachers_from_excel()
 
-def load_initial_teachers_from_excel():
-    global teachers_db
     try:
         if os.path.exists('بطاقات الاساتذة.xlsx'):
             df = pd.read_excel('بطاقات الاساتذة.xlsx', sheet_name=0)
@@ -119,14 +74,8 @@ def load_initial_teachers_from_excel():
                     'register_no': str(row.get('رقم السجل', 'غير محدد')) if pd.notna(row.get('رقم السجل')) else 'غير محدد',
                     'district': str(row.get('القضاء', 'غير محدد')) if pd.notna(row.get('القضاء')) else 'غير محدد',
                     'town': str(row.get('بلدة النفوس', 'غير محدد')) if pd.notna(row.get('بلدة النفوس')) else 'غير محدد',
-                    'address': str(row.get('العنوان الحالي', 'غير محدد')) if pd.notna(row.get('العنوان الحالي')) else 'غير محدد',
-                    'marital_status': str(row.get('الوضع العائلي', 'غير محدد')) if pd.notna(row.get('الوضع العائلي')) else 'غير محدد',
-                    'children_count': str(row.get('عدد الأولاد', '0')) if pd.notna(row.get('عدد الأولاد')) else '0',
-                    'start_date': str(row.get('تاريخ المباشرة', 'غير محدد')) if pd.notna(row.get('تاريخ المباشرة')) else 'غير محدد',
                     'job_status': str(row.get('الوضع الوظيفي', 'غير محدد')) if pd.notna(row.get('الوضع الوظيفي')) else 'غير محدد',
-                    'degree': str(row.get('الشهادة', 'غير محددة')) if pd.notna(row.get('الشهادة')) else 'غير محددة',
                     'subject': str(row.get('المادة التي يدرسها', 'غير محددة')) if pd.notna(row.get('المادة التي يدرسها')) else 'غير محددة',
-                    'teaching_degree': str(row.get('الشهادة التي يدرسها', 'غير محددة')) if pd.notna(row.get('الشهادة التي يدرسها')) else 'غير محددة',
                     'contract_hours': int(row.get('مجموع ساعات العقود', 0)) if pd.notna(row.get('مجموع ساعات العقود')) else 0,
                     'phone': str(row.get('رقم الهاتف', 'غير متوفر')) if pd.notna(row.get('رقم الهاتف')) else 'غير متوفر',
                     'bank': str(row.get('اسم البنك', 'غير متوفر')) if pd.notna(row.get('اسم البنك')) else 'غير متوفر',
@@ -139,46 +88,28 @@ def load_initial_teachers_from_excel():
     except Exception as e:
         print(f"Error loading excel: {e}")
 
-initialize_system()
+load_initial_teachers()
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 ICON_URL = "https://cdn-icons-png.flaticon.com/512/3135/3135755.png"
 
-PWA_HEAD = f'''
-    <link rel="manifest" href="/manifest.json">
-    <meta name="theme-color" content="#1a365d">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="معهد الهرمل">
-    <link rel="apple-touch-icon" href="{ICON_URL}">
-    <script>
-        if ('serviceWorker' in navigator) {{
-            window.addEventListener('load', () => {{
-                navigator.serviceWorker.register('/sw.js');
-            }});
-        }}
-    </script>
-'''
-
 @app.route('/manifest.json')
 def manifest():
     return jsonify({
         "short_name": "معهد الهرمل",
-        "name": "معهد الهرمل الفني",
+        "name": "المديرية العامة للتعليم المهني - معهد الهرمل الفني",
         "icons": [{"src": ICON_URL, "type": "image/png", "sizes": "512x512"}],
         "start_url": "/",
-        "background_color": "#1a365d",
-        "theme_color": "#1a365d",
-        "display": "standalone",
-        "orientation": "portrait"
+        "background_color": "#0d47a1",
+        "theme_color": "#0d47a1",
+        "display": "standalone"
     })
 
 @app.route('/sw.js')
 def service_worker():
-    sw_code = "self.addEventListener('install', (e) => { self.skipWaiting(); }); self.addEventListener('activate', (e) => { e.waitUntil(self.clients.claim()); });"
-    return app.response_class(sw_code, mimetype='application/javascript')
+    return app.response_class("self.addEventListener('install', e => self.skipWaiting()); self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));", mimetype='application/javascript')
 
 @app.route('/api/check_notifications')
 def check_notifications():
@@ -189,22 +120,80 @@ def check_notifications():
         return jsonify({'count': len(notifs), 'latest': notifs[-1] if notifs else ''})
     return jsonify({'count': 0, 'latest': ''})
 
-@app.route('/uploads/<filename>')
-def uploaded_file(filename):
-    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+PWA_HEAD = f'''
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#0d47a1">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <link rel="apple-touch-icon" href="{ICON_URL}">
+    <script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');</script>
+'''
 
-@app.route('/logout')
-def logout():
-    session.clear()
-    return redirect(url_for('login'))
+# تصميم الهيدر وشريط القوائم المنسدلة المطابق لموقع المديرية العامة تماماً
+HEADER_VTE_HTML = '''
+<div style="background:#0d47a1; color:white; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; border-bottom:3px solid #1565c0;">
+    <div style="display:flex; align-items:center; gap:12px;">
+        <img src="https://cdn-icons-png.flaticon.com/512/3135/3135755.png" width="38" height="38" style="background:white; border-radius:50%; padding:2px;">
+        <div>
+            <div style="font-weight:bold; font-size:16px;">المديرية العامة للتعليم المهني والتقني</div>
+            <div style="font-size:12px; color:#bbdefb;">معهد الهرمل الفني (رقم المعهد: 84)</div>
+        </div>
+    </div>
+    <div>
+        <a href="/logout" style="color:#ffcdd2; text-decoration:none; font-weight:bold; font-size:13px; background:#c62828; padding:6px 12px; border-radius:4px;">تسجيل الخروج</a>
+    </div>
+</div>
+
+<div style="background:#1565c0; padding:0 20px; display:flex; gap:5px; border-bottom:1px solid #1976d2;">
+    <a href="/admin" style="color:white; text-decoration:none; padding:12px 16px; font-weight:bold; font-size:14px; background:#0d47a1;">🏠 Home</a>
+    
+    <!-- قائمة الطلاب المنسدلة -->
+    <div class="dropdown">
+        <button class="dropbtn">الطلاب ▾</button>
+        <div class="dropdown-content">
+            <a href="javascript:void(0)" onclick="showSection('studentAttendanceSec')">📋 حضور وغياب الطلاب</a>
+            <a href="javascript:void(0)" onclick="showSection('studentGradesSec')">📝 علامات ونتائج الطلاب</a>
+        </div>
+    </div>
+
+    <!-- قائمة الأساتذة والدوام المنسدلة -->
+    <div class="dropdown">
+        <button class="dropbtn">الأساتذة والدوام ▾</button>
+        <div class="dropdown-content">
+            <a href="javascript:void(0)" onclick="showSection('teacherHoursSec')">⏱️ الساعات المنفذة للأساتذة</a>
+            <a href="javascript:void(0)" onclick="showSection('teacherDaysSec')">📅 أيام الحضور للأساتذة</a>
+            <a href="javascript:void(0)" onclick="showSection('teacherScheduleSec')">📄 جدول الحصص PDF</a>
+        </div>
+    </div>
+
+    <!-- قائمة الإدارة والتعاميم المنسدلة -->
+    <div class="dropdown">
+        <button class="dropbtn">إعدادات وإدارة ▾</button>
+        <div class="dropdown-content">
+            <a href="javascript:void(0)" onclick="showSection('importExcelSec')">📊 استيراد ملفات الإكسل</a>
+            <a href="javascript:void(0)" onclick="showSection('sendNotifSec')">📢 إرسال تعميم / تنبيه</a>
+            <a href="javascript:void(0)" onclick="showSection('changePassSec')">🔑 تغيير كلمة السر</a>
+        </div>
+    </div>
+</div>
+
+<style>
+    .dropdown { position: relative; display: inline-block; }
+    .dropbtn { background-color: #1565c0; color: white; padding: 12px 16px; font-size: 14px; border: none; cursor: pointer; font-weight: bold; font-family: inherit; }
+    .dropdown:hover .dropbtn { background-color: #0d47a1; }
+    .dropdown-content { display: none; position: absolute; background-color: #ffffff; min-width: 210px; box-shadow: 0px 8px 16px rgba(0,0,0,0.2); z-index: 100; border-radius: 0 0 6px 6px; }
+    .dropdown-content a { color: #333; padding: 10px 15px; text-decoration: none; display: block; font-size: 13.5px; border-bottom: 1px solid #f0f0f0; }
+    .dropdown-content a:hover { background-color: #e3f2fd; color: #0d47a1; font-weight: bold; }
+    .dropdown:hover .dropdown-content { display: block; }
+</style>
+'''
 
 @app.route('/', methods=['GET', 'POST'])
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     error = ''
     if request.method == 'POST':
-        username = request.form.get('username', '').strip().lower()
-        password = request.form.get('password', '').strip()
+        username = request.form.get('username').strip().lower()
+        password = request.form.get('password').strip()
         
         if username == admin_credentials['username'] and password == admin_credentials['password']:
             session['username'] = 'admin'
@@ -223,210 +212,45 @@ def login():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>معهد الهرمل الفني - تسجيل الدخول</title>
+        <title>المديرية العامة للتعليم المهني - تسجيل الدخول</title>
         {PWA_HEAD}
         <style>
-            body {{ font-family: 'Segoe UI', Tahoma, sans-serif; background: #1a202c; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; flex-direction: column; }}
-            .card {{ background: white; padding: 40px 30px; border-radius: 16px; width: 90%; max-width: 380px; text-align: center; box-shadow: 0 15px 35px rgba(0,0,0,0.3); }}
-            h2 {{ color: #1a365d; margin-bottom: 25px; font-size: 24px; font-weight: bold; }}
-            input {{ width: 100%; padding: 12px; margin: 10px 0; border: 1.5px solid #cbd5e0; border-radius: 8px; box-sizing: border-box; text-align: right; font-size: 15px; }}
-            button {{ width: 100%; padding: 12px; background: #2b6cb0; color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 16px; cursor: pointer; margin-top: 15px; }}
-            button:hover {{ background: #1a365d; }}
-            .error {{ color: #e53e3e; margin-top: 12px; font-weight: bold; font-size: 14px; }}
-            .designer-tag {{ margin-top: 25px; color: #a0aec0; font-size: 13px; font-weight: 500; text-align: center; }}
+            body {{ font-family: system-ui, sans-serif; background: #e3f2fd; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; flex-direction: column; }}
+            .card {{ background: white; padding: 35px 25px; border-radius: 12px; width: 90%; max-width: 380px; text-align: center; box-shadow: 0 8px 20px rgba(13,71,161,0.15); border-top: 5px solid #0d47a1; }}
+            h2 {{ color: #0d47a1; margin-bottom: 20px; font-size: 20px; }}
+            input {{ width: 100%; padding: 12px; margin: 8px 0; border: 1.5px solid #bbdefb; border-radius: 6px; box-sizing: border-box; text-align: right; font-size: 14px; }}
+            button {{ width: 100%; padding: 12px; background: #0d47a1; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; margin-top: 10px; font-size: 15px; }}
+            button:hover {{ background: #1565c0; }}
+            .designer-tag {{ margin-top: 25px; color: #5c6bc0; font-size: 12px; font-weight: 500; }}
         </style>
     </head>
     <body>
         <div class="card">
-            <h2>معهد الهرمل الفني</h2>
+            <img src="https://cdn-icons-png.flaticon.com/512/3135/3135755.png" width="60" style="margin-bottom:10px;">
+            <h2>المديرية العامة للتعليم المهني والتقني<br><small style="font-size:14px; color:#555;">معهد الهرمل الفني</small></h2>
             <form method="POST">
                 <input type="text" name="username" placeholder="اسم المستخدم" required>
                 <input type="password" name="password" placeholder="كلمة المرور" required>
                 <button type="submit">دخول النظام</button>
             </form>
-            <div class="error">{error}</div>
+            <div style="color:#d32f2f; margin-top:12px; font-weight:bold; font-size:13px;">{error}</div>
         </div>
         <div class="designer-tag">🛠️ تم تصميم وتطوير البرنامج من قبل الأستاذ محمد حسين شمص</div>
     </body>
     </html>
     '''
 
-@app.route('/admin/add_year', methods=['POST'])
-def add_academic_year():
-    if session.get('role') != 'admin': return redirect(url_for('login'))
-    new_y = request.form.get('new_year', '').strip()
-    if new_y and new_y not in academic_years_db:
-        academic_years_db.append(new_y)
-        save_to_disk()
-    return redirect(url_for('admin_dashboard'))
-
-@app.route('/admin/switch_year', methods=['POST'])
-def switch_academic_year():
-    global current_academic_year
-    if session.get('role') != 'admin': return redirect(url_for('login'))
-    sel_y = request.form.get('academic_year')
-    if sel_y in academic_years_db:
-        current_academic_year = sel_y
-        save_to_disk()
-    return redirect(url_for('admin_dashboard'))
-
-# قالب إكسل الطلاب
-@app.route('/admin/download_students_template')
-def download_students_template():
-    if session.get('role') != 'admin': return redirect(url_for('login'))
-    df_temp = pd.DataFrame({
-        'اسم الطالب الثلاثي': ['علي أحمد حسن', 'حسن محمد علي', 'ميرا حسين شمص'],
-        'الصف': ['BT3', 'BT3', 'TS2'],
-        'الاختصاص': ['عناية تمريضية', 'عناية تمريضية', 'معلوماتية صناعية'],
-        'رقم الهاتف': ['03123456', '70987654', '71112233']
-    })
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df_temp.to_excel(output, index=False, sheet_name='الطلاب')
-    output.seek(0)
-    return send_file(output, download_name="قالب_رفع_طلاب_المديرية.xlsx", as_attachment=True)
-
-# قالب إكسل توزيع المواد والأساتذة على الصفوف والاختصاصات
-@app.route('/admin/download_assignments_template')
-def download_assignments_template():
-    if session.get('role') != 'admin': return redirect(url_for('login'))
-    sample_teacher = list(teachers_db.values())[0]['name'] if teachers_db else 'اسم الأستاذ'
-    df_temp = pd.DataFrame({
-        'الصف': ['BT3', 'BT3', 'TS2'],
-        'الاختصاص': ['عناية تمريضية', 'عناية تمريضية', 'معلوماتية صناعية'],
-        'المادة': ['تمريض باطني', 'تشريح', 'شبكات حاسوب'],
-        'اسم الأستاذ': [sample_teacher, sample_teacher, sample_teacher]
-    })
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df_temp.to_excel(output, index=False, sheet_name='توزيع المواد')
-    output.seek(0)
-    return send_file(output, download_name="قالب_توزيع_المواد_والأساتذة.xlsx", as_attachment=True)
-
-@app.route('/admin/upload_students_excel', methods=['POST'])
-def upload_students_excel():
-    if session.get('role') != 'admin': return redirect(url_for('login'))
-    file = request.files.get('students_excel')
-    if file and allowed_file(file.filename):
-        try:
-            df = pd.read_excel(file)
-            added = 0
-            for _, row in df.iterrows():
-                s_name = str(row.get('اسم الطالب الثلاثي', row.get('name', ''))).strip()
-                s_class = str(row.get('الصف', row.get('class', ''))).strip()
-                s_major = str(row.get('الاختصاص', row.get('major', ''))).strip()
-                s_phone = str(row.get('رقم الهاتف', row.get('phone', 'غير متوفر'))).strip()
-                
-                if s_name and s_name != 'nan':
-                    students_db.append({
-                        "id": len(students_db) + 1,
-                        "name": s_name,
-                        "class": s_class,
-                        "major": s_major,
-                        "phone": s_phone,
-                        "academic_year": current_academic_year
-                    })
-                    added += 1
-            save_to_disk()
-            session['msg'] = f"تم استيراد {added} طالب بنجاح للعام الدراسي {current_academic_year}!"
-        except Exception as e:
-            session['msg'] = f"خطأ أثناء قراءة ملف إكسل الطلاب: {e}"
-    return redirect(url_for('admin_dashboard'))
-
-@app.route('/admin/upload_assignments_excel', methods=['POST'])
-def upload_assignments_excel():
-    if session.get('role') != 'admin': return redirect(url_for('login'))
-    file = request.files.get('assignments_excel')
-    if file and allowed_file(file.filename):
-        try:
-            df = pd.read_excel(file)
-            added = 0
-            for _, row in df.iterrows():
-                cls = str(row.get('الصف', '')).strip()
-                mjr = str(row.get('الاختصاص', '')).strip()
-                subj = str(row.get('المادة', '')).strip()
-                t_name = str(row.get('اسم الأستاذ', '')).strip()
-                
-                if cls and mjr and subj and t_name and t_name != 'nan':
-                    # إزالة أي تعيين قديم مطابق لنفس الصف والاختصاص والمادة لنمنع التكرار
-                    global teacher_assignments
-                    teacher_assignments = [a for a in teacher_assignments if not (a['academic_year'] == current_academic_year and a['class_name'] == cls and a['major'] == mjr and a['subject'] == subj)]
-                    
-                    teacher_assignments.append({
-                        "academic_year": current_academic_year,
-                        "class_name": cls,
-                        "major": mjr,
-                        "subject": subj,
-                        "teacher_name": t_name
-                    })
-                    added += 1
-            save_to_disk()
-            session['msg'] = f"تم استيراد وربط {added} مادة للأساتذة بالصفوف بنجاح!"
-        except Exception as e:
-            session['msg'] = f"خطأ أثناء قراءة ملف توزيع المواد: {e}"
-    return redirect(url_for('admin_dashboard'))
-
-@app.route('/admin/create_field_session', methods=['POST'])
-def create_field_session():
-    if session.get('role') != 'admin': return redirect(url_for('login'))
-    p_teacher = request.form.get('primary_teacher')
-    s_teacher = request.form.get('secondary_teacher')
-    
-    new_s = {
-        "id": len(field_sessions) + 1,
-        "academic_year": current_academic_year,
-        "class_name": request.form.get('class_name'),
-        "major": request.form.get('major'),
-        "location": request.form.get('location'),
-        "primary_teacher": p_teacher if p_teacher else "غير محدد",
-        "secondary_teacher": s_teacher if s_teacher and s_teacher != 'none' else None,
-        "attendance": {},
-        "submitted_by": None,
-        "status": "قيد التدريب",
-        "created_at": datetime.now().strftime('%Y-%m-%d %H:%M')
-    }
-    field_sessions.append(new_s)
-    save_to_disk()
-    session['msg'] = "تم إنشاء وتكليف جلسة التدريب الميداني بنجاح!"
-    return redirect(url_for('admin_dashboard'))
-
-@app.route('/admin/download_template')
-def download_template():
-    if session.get('role') != 'admin': return redirect(url_for('login'))
-    names = [t['name'] for u, t in teachers_db.items()]
-    df_template = pd.DataFrame({
-        'الاسم الثلاثي': names,
-        'عدد أيام النقل': [0] * len(names)
-    })
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df_template.to_excel(output, index=False, sheet_name='بدل النقل الشهري')
-    output.seek(0)
-    return send_file(output, download_name="نموذج_بدل_النقل_الشهري.xlsx", as_attachment=True)
-
-@app.route('/admin/delete_reply/<int:reply_id>', methods=['POST'])
-def delete_reply(reply_id):
-    if session.get('role') == 'admin' and 0 <= reply_id < len(admin_replies):
-        admin_replies.pop(reply_id)
-        save_to_disk()
-    return redirect(url_for('admin_dashboard'))
-
-@app.route('/admin/delete_teacher/<username>', methods=['POST'])
-def delete_teacher(username):
-    if session.get('role') == 'admin' and username in teachers_db:
-        del teachers_db[username]
-        save_to_disk()
-    return redirect(url_for('admin_dashboard'))
-
 @app.route('/admin', methods=['GET', 'POST'])
 def admin_dashboard():
-    if session.get('role') != 'admin': return redirect(url_for('login'))
+    if session.get('role') != 'admin':
+        return redirect(url_for('login'))
         
-    msg = session.pop('msg', '')
+    msg = ''
     if request.method == 'POST':
         action = request.form.get('action')
+        
         if action == 'change_admin_password':
-            new_pass = request.form.get('new_password', '').strip()
+            new_pass = request.form.get('new_password').strip()
             if new_pass:
                 admin_credentials['password'] = new_pass
                 save_to_disk()
@@ -441,33 +265,36 @@ def admin_dashboard():
                     updated_count = 0
                     for _, row in df_m.iterrows():
                         t_name = str(row.get('الاسم الثلاثي', '')).strip()
+                        hours = row.get('عدد الحصص', row.get('ساعات التدريس', 0))
                         days = row.get('عدد أيام النقل', row.get('عدد الايام', 0))
+                        
+                        try: hours = int(hours) if pd.notna(hours) else 0
+                        except: hours = 0
                         try: days = int(days) if pd.notna(days) else 0
                         except: days = 0
 
                         for u, t_data in teachers_db.items():
                             if t_data['name'] == t_name or t_name in t_data['name']:
-                                if 'monthly_data' not in t_data: t_data['monthly_data'] = {}
-                                if month_name not in t_data['monthly_data']: t_data['monthly_data'][month_name] = {'hours': 0, 'days': 0}
-                                t_data['monthly_data'][month_name]['days'] = days
+                                if 'monthly_data' not in t_data:
+                                    t_data['monthly_data'] = {}
+                                t_data['monthly_data'][month_name] = {'hours': hours, 'days': days}
                                 updated_count += 1
                     save_to_disk()
-                    msg = f"تم تحديث أيام النقل لشهر ({month_name}) بنجاح لعدد ({updated_count}) أستاذ!"
+                    msg = f"تم استيراد ملف الإكسل لشهر ({month_name}) بنجاح لعدد ({updated_count}) أستاذ!"
                 except Exception as e:
-                    msg = f"حدث خطأ أثناء قراءة ملف النقل: {e}"
+                    msg = f"حدث خطأ أثناء قراءة الملف: {e}"
 
         elif action == 'send_notification':
             target_user = request.form.get('target_user')
             notif = request.form.get('notification_text')
             if target_user == 'all':
-                for u, t_data in teachers_db.items():
-                    t_data['notifications'].append(f"📢 تعميم إداري: {notif}")
-                save_to_disk()
+                for u, t in teachers_db.items():
+                    t['notifications'].append(f"📢 تعميم إداري: {notif}")
                 msg = "تم إرسال التعميم لجميع الأساتذة بنجاح!"
-            elif target_user in teachers_db and notif:
+            elif target_user in teachers_db:
                 teachers_db[target_user]['notifications'].append(notif)
-                save_to_disk()
-                msg = f"تم إرسال الإشعار للأستاذ {teachers_db[target_user]['name']} بنجاح!"
+                msg = f"تم إرسال التنبيه للأستاذ {teachers_db[target_user]['name']}!"
+            save_to_disk()
 
         elif action == 'upload_pdf':
             target_user = request.form.get('target_user')
@@ -477,69 +304,20 @@ def admin_dashboard():
                 file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
                 teachers_db[target_user]['schedule_pdf'] = filename
                 save_to_disk()
-                msg = f"تم رفع جدول التدريس PDF للأستاذ {teachers_db[target_user]['name']}."
+                msg = f"تم رفع جدول التدريس PDF للأستاذ {teachers_db[target_user]['name']}!"
 
-    replies_html = ""
-    for idx, r in enumerate(reversed(admin_replies)):
-        real_idx = len(admin_replies) - 1 - idx
-        report_link = f"<a href='/uploads/{r['report']}' target='_blank'>📎 عرض العذر</a>" if r.get('report') else "لا يوجد مرفق"
-        replies_html += f"""
-        <div style="background:#fffaf0; border-right:4px solid #dd6b20; padding:12px; margin-bottom:10px; border-radius:6px; display:flex; justify-content:space-between; align-items:center;">
-            <div>
-                <span style="color:#2b6cb0; font-weight:bold;">📩 من: {r['teacher_name']}</span> | <small>{r.get('date', '')}</small><br>
-                <b>الرسالة:</b> {r['message']}<br>
-                <small>{report_link}</small>
-            </div>
-            <form method="POST" action="/admin/delete_reply/{real_idx}" style="margin:0;">
-                <button type="submit" style="background:#e53e3e; color:white; border:none; padding:5px 10px; border-radius:4px; font-size:12px; cursor:pointer;">✖️ إزالة</button>
-            </form>
-        </div>
-        """
-    if not replies_html: replies_html = "<p style='color:#718096;'>لا توجد إجابات ورسائل جديدة.</p>"
-
-    active_field_sessions = [s for s in field_sessions if s.get('academic_year') == current_academic_year]
-    field_rows = ""
-    for fs in reversed(active_field_sessions):
-        sec_t = f" / {fs['secondary_teacher']}" if fs['secondary_teacher'] else ""
-        att_info = ""
-        if fs['status'] == 'مكتملة':
-            absents = [st for st, stt in fs['attendance'].items() if stt == 'غائب']
-            abs_str = ", ".join(absents) if absents else "لا يوجد غياب"
-            att_info = f"<span style='color:#38a169; font-weight:bold;'>مكتملة بواسطة ({fs['submitted_by']})</span><br><small style='color:#e53e3e;'>الغائبون: {abs_str}</small>"
-        else:
-            att_info = "<span style='color:#dd6b20; font-weight:bold;'>⏳ قيد انتظار الأستاذ</span>"
-
-        field_rows += f"""
-        <tr>
-            <td><b>{fs['location']}</b><br><small>{fs['class_name']} - {fs['major']}</small></td>
-            <td><b>{fs['primary_teacher']}</b>{sec_t}</td>
-            <td>{att_info}</td>
-        </tr>
-        """
-    if not field_rows: field_rows = "<tr><td colspan='3'>لا توجد جلسات ميدانية مضافة لهذا العام بعد.</td></tr>"
-
-    rows = ""
+    # تجهيز الجداول
+    hours_rows = ""
+    days_rows = ""
     for username, t in teachers_db.items():
-        pdf_status = f"<a href='/uploads/{t['schedule_pdf']}' target='_blank'>📄 عرض PDF</a>" if t['schedule_pdf'] else "غير مرفوع"
-        m_data_list = [f"<b>{m}:</b> {val.get('days', 0)} أيام نقل" for m, val in t.get('monthly_data', {}).items()]
-        m_str = "<br>".join(m_data_list) if m_data_list else "لم تُرفع بعد"
-
-        rows += f"""
-        <tr>
-            <td><b>{t['name']}</b><br><small style='color:#4a5568;'>المادة العامة: {t['subject']}</small><br><code>حساب: {username} | سر: {t['password']}</code></td>
-            <td style="background:#f7fafc; color:#2b6cb0; font-size:12px;">{m_str}</td>
-            <td>{pdf_status}</td>
-            <td>
-                <form method="POST" action="/admin/delete_teacher/{username}" onsubmit="return confirm('حذف الأستاذ؟');" style="margin:0;">
-                    <button type="submit" style="background:#e53e3e; color:white; border:none; padding:6px 10px; border-radius:4px; font-size:12px; cursor:pointer;">🗑️ حذف</button>
-                </form>
-            </td>
-        </tr>
-        """
-
-    years_options = "".join([f"<option value='{y}' {'selected' if y==current_academic_year else ''}>{y}</option>" for y in academic_years_db])
-    teachers_options = "".join([f"<option value='{t['name']}'>{t['name']}</option>" for u, t in teachers_db.items()])
-    locations_options = "".join([f"<option value='{loc}'>{loc}</option>" for loc in TRAINING_LOCATIONS.keys()])
+        m_hours = []
+        m_days = []
+        for m, v in t.get('monthly_data', {}).items():
+            m_hours.append(f"<b>{m}:</b> {v.get('hours', 0)} حصة")
+            m_days.append(f"<b>{m}:</b> {v.get('days', 0)} يوم")
+        
+        hours_rows += f"<tr><td><b>{t['name']}</b><br><small>{t['subject']}</small></td><td><b>{t['contract_hours']} ساعة</b></td><td>{' | '.join(m_hours) if m_hours else 'لم يرفع'}</td></tr>"
+        days_rows += f"<tr><td><b>{t['name']}</b></td><td>{' | '.join(m_days) if m_days else 'لم يرفع'}</td></tr>"
 
     return f'''
     <!DOCTYPE html>
@@ -547,246 +325,127 @@ def admin_dashboard():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>معهد الهرمل الفني - لوحة الإدارة</title>
+        <title>المديرية العامة - معهد الهرمل الفني</title>
         {PWA_HEAD}
         <style>
-            body {{ font-family: system-ui, sans-serif; background: #edf2f7; margin: 0; padding: 15px; }}
-            .navbar {{ background: #1a365d; color: white; padding: 18px 25px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 10px rgba(0,0,0,0.1); flex-wrap: wrap; gap:10px; }}
-            .card {{ background: white; padding: 20px; border-radius: 12px; margin-top: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }}
+            body {{ font-family: system-ui, sans-serif; background: #f4f6f9; margin: 0; padding-bottom: 30px; }}
+            .container {{ padding: 20px; }}
+            .card {{ background: white; padding: 20px; border-radius: 8px; margin-top: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); border-top: 4px solid #0d47a1; display: none; }}
+            .card.active {{ display: block; }}
+            input, select, textarea, button {{ padding: 10px; border: 1px solid #ccc; border-radius: 5px; text-align: right; font-size: 14px; width: 100%; box-sizing: border-box; margin-top: 8px; font-family: inherit; }}
+            button {{ background: #0d47a1; color: white; font-weight: bold; cursor: pointer; border: none; }}
+            button:hover {{ background: #1565c0; }}
             table {{ width: 100%; border-collapse: collapse; margin-top: 15px; }}
-            th, td {{ border: 1px solid #e2e8f0; padding: 10px; text-align: center; font-size: 13px; }}
-            th {{ background: #2b6cb0; color: white; }}
-            form {{ display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }}
-            input, select, button {{ padding: 10px; border: 1px solid #cbd5e0; border-radius: 6px; text-align: right; font-size: 14px; }}
-            button {{ background: #38a169; color: white; border: none; font-weight: bold; cursor: pointer; }}
-            .msg {{ background: #c6f6d5; color: #22543d; padding: 12px; border-radius: 8px; margin-top: 15px; font-weight: bold; text-align: center; }}
-            .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; }}
-            .designer-tag {{ margin-top: 30px; color: #718096; font-size: 13px; font-weight: 500; text-align: center; border-top: 1px solid #cbd5e0; padding-top: 15px; }}
-            .autocomplete-container {{ position: relative; width: 100%; }}
-            .suggestionsList {{ position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #cbd5e0; border-radius: 0 0 6px 6px; max-height: 180px; overflow-y: auto; z-index: 1000; display: none; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }}
-            .suggestion-item {{ padding: 10px; cursor: pointer; border-bottom: 1px solid #edf2f7; font-size: 14px; text-align: right; }}
-            .suggestion-item:hover {{ background: #ebf8ff; color: #2b6cb0; font-weight: bold; }}
+            th, td {{ border: 1px solid #e0e0e0; padding: 10px; text-align: center; font-size: 13.5px; }}
+            th {{ background: #0d47a1; color: white; }}
+            .msg {{ background: #e8f5e9; color: #2e7d32; padding: 12px; border-radius: 6px; margin-bottom: 15px; font-weight: bold; border-right: 4px solid #2e7d32; }}
+            .vte-box {{ background: #e3f2fd; padding: 15px; border-radius: 8px; border-right: 4px solid #1565c0; margin-bottom: 15px; font-size: 14px; line-height: 1.6; }}
         </style>
     </head>
     <body>
-        <div class="navbar">
-            <div>
-                <h2 style="margin:0;">معهد الهرمل الفني - لوحة الإدارة</h2>
-                <small>العام الدراسي النشط حالياً: <b>{current_academic_year}</b></small>
+        {HEADER_VTE_HTML}
+
+        <div class="container">
+            {f'<div class="msg">{msg}</div>' if msg else ''}
+
+            <div class="vte-box">
+                🏛️ <b>بوابة معهد الهرمل الفني الإدارية:</b> اضغط على القوائم المنسدلة في الشريط الأزرق في الأعلى للتنقل المباشر بين معلومات <b>الطلاب</b>، <b>الأساتذة والدوام</b>، و<b>إعدادات النظام</b>.
             </div>
-            <div style="display:flex; gap:10px; align-items:center;">
-                <form action="/admin/switch_year" method="POST" style="margin:0; flex-direction:row;">
-                    <select name="academic_year" onchange="this.form.submit()" style="background:#2b6cb0; color:white; font-weight:bold;">
-                        {years_options}
+
+            <!-- قسم حضور وغياب الطلاب -->
+            <div id="studentAttendanceSec" class="card active">
+                <h3 style="margin-top:0; color:#0d47a1;">📋 حضور وغياب الطلاب (حسب العام الدراسي 2025-2026)</h3>
+                <p style="color:#666; font-size:13px;">يستطيع الأستاذ إدخال وتأكيد حضور وغياب الطلاب لصفه يومياً من حسابه الشخصي.</p>
+                <table>
+                    <tr><th>الصف والتاريخ</th><th>الطلاب الغائبون الموثقون</th></tr>
+                    {''.join([f'<tr><td><b>{k}</b></td><td>{", ".join(v) if v else "لا يوجد غياب"}</td></tr>' for k,v in attendance_db.items()]) if attendance_db else '<tr><td colspan="2">لم يتم تسجيل غياب اليوم بعد</td></tr>'}
+                </table>
+            </div>
+
+            <!-- قسم علامات ونتائج الطلاب -->
+            <div id="studentGradesSec" class="card">
+                <h3 style="margin-top:0; color:#0d47a1;">📝 علامات ونتائج الامتحانات (من 20)</h3>
+                <table>
+                    <tr><th>اسم الطالب والمادة</th><th>العلامة المعتمدة</th></tr>
+                    {''.join([f'<tr><td><b>{k}</b></td><td><b style="color:#0d47a1;">{v} / 20</b></td></tr>' for k,v in grades_db.items()]) if grades_db else '<tr><td colspan="2">لم تُدخل علامات جديدة بعد</td></tr>'}
+                </table>
+            </div>
+
+            <!-- قسم الساعات المنفذة للأساتذة -->
+            <div id="teacherHoursSec" class="card">
+                <h3 style="margin-top:0; color:#0d47a1;">⏱️ الساعات المنفذة للأساتذة (مستوردة من الإكسل)</h3>
+                <table>
+                    <tr><th>اسم الأستاذ والمادة</th><th>عقد الساعات</th><th>الساعات المنفذة شهرياً</th></tr>
+                    {hours_rows}
+                </table>
+            </div>
+
+            <!-- قسم أيام الحضور للأساتذة -->
+            <div id="teacherDaysSec" class="card">
+                <h3 style="margin-top:0; color:#0d47a1;">📅 أيام الحضور والدوام للأساتذة</h3>
+                <table>
+                    <tr><th>اسم الأستاذ</th><th>أيام بدل النقل والحضور شهرياً</th></tr>
+                    {days_rows}
+                </table>
+            </div>
+
+            <!-- قسم جدول الحصص PDF -->
+            <div id="teacherScheduleSec" class="card">
+                <h3 style="margin-top:0; color:#0d47a1;">📄 رفع جدول التدريس الأسبوعي (PDF)</h3>
+                <form method="POST" enctype="multipart/form-data">
+                    <input type="hidden" name="action" value="upload_pdf">
+                    <select name="target_user" required>
+                        {''.join([f'<option value="{u}">{t["name"]} ({t["subject"]})</option>' for u,t in teachers_db.items()])}
                     </select>
-                </form>
-                <a href="/logout" style="color:white; font-weight:bold; text-decoration:none; background:#e53e3e; padding:8px 15px; border-radius:6px;">تسجيل الخروج</a>
-            </div>
-        </div>
-
-        {f'<div class="msg">{msg}</div>' if msg else ''}
-
-        <div class="grid">
-            <div class="card" style="border-top: 4px solid #319795;">
-                <h4 style="margin-top:0; color:#2c7a7b;">📅 إدارة الأعوام الدراسية:</h4>
-                <form action="/admin/add_year" method="POST" style="flex-direction:row; gap:5px;">
-                    <input type="text" name="new_year" placeholder="مثال: 2029-2030" required style="flex:1;">
-                    <button type="submit" style="background:#319795;">إضافة عام</button>
+                    <input type="file" name="pdf_file" accept=".pdf" required>
+                    <button type="submit">رفع ملف جدول PDF</button>
                 </form>
             </div>
 
-            <div class="card" style="border-top: 4px solid #d69e2e;">
-                <h4 style="margin-top:0; color:#b7791f;">📥 1. استيراد طلاب المديرية:</h4>
-                <a href="/admin/download_students_template" style="background:#742a2a; color:white; text-decoration:none; padding:6px 10px; border-radius:6px; font-size:12px; text-align:center; display:inline-block; margin-bottom:5px;">📥 تحميل قالب إكسل الطلاب</a>
-                <form action="/admin/upload_students_excel" method="POST" enctype="multipart/form-data">
-                    <input type="file" name="students_excel" accept=".xlsx,.xls" required>
-                    <button type="submit" style="background:#d69e2e;">رفع واستيراد ملف الطلاب</button>
-                </form>
-            </div>
-
-            <div class="card" style="border-top: 4px solid #805ad5;">
-                <h4 style="margin-top:0; color:#553c9a;">📥 2. استيراد توزيع المواد والأساتذة:</h4>
-                <a href="/admin/download_assignments_template" style="background:#553c9a; color:white; text-decoration:none; padding:6px 10px; border-radius:6px; font-size:12px; text-align:center; display:inline-block; margin-bottom:5px;">📥 تحميل قالب توزيع المواد</a>
-                <form action="/admin/upload_assignments_excel" method="POST" enctype="multipart/form-data">
-                    <input type="file" name="assignments_excel" accept=".xlsx,.xls" required>
-                    <button type="submit" style="background:#805ad5;">رفع توزيع المواد على الصفوف</button>
-                </form>
-            </div>
-        </div>
-
-        <div class="card" style="border-top: 4px solid #805ad5;">
-            <h3 style="margin-top:0; color:#553c9a;">🏥 إضافة جلسة تدريب ميداني (GPS):</h3>
-            <form action="/admin/create_field_session" method="POST" class="grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
-                <div>
-                    <label style="font-size:12px;">المكان المعتمد:</label>
-                    <select name="location" required style="width:100%;">
-                        {locations_options}
-                    </select>
-                </div>
-                <div>
-                    <label style="font-size:12px;">الصف (مثال BT3):</label>
-                    <input type="text" name="class_name" placeholder="BT3" required style="width:100%;">
-                </div>
-                <div>
-                    <label style="font-size:12px;">الاختصاص:</label>
-                    <input type="text" name="major" placeholder="عناية تمريضية" required style="width:100%;">
-                </div>
-                <div>
-                    <label style="font-size:12px;">الأستاذ الرئيسي:</label>
-                    <select name="primary_teacher" required style="width:100%;">
-                        {teachers_options}
-                    </select>
-                </div>
-                <div>
-                    <label style="font-size:12px;">الأستاذ المساعد:</label>
-                    <select name="secondary_teacher" style="width:100%;">
-                        <option value="none">-- أستاذ واحد فقط --</option>
-                        {teachers_options}
-                    </select>
-                </div>
-                <div style="grid-column: 1 / -1;">
-                    <button type="submit" style="background:#805ad5; width:100%;">حفظ وتكليف الجلسة الميدانية</button>
-                </div>
-            </form>
-
-            <h4 style="margin-top:20px;">سجل الحضور والغياب الميداني:</h4>
-            <table>
-                <tr>
-                    <th>المكان والصف</th>
-                    <th>الأستاذ المشرف</th>
-                    <th>الحالة</th>
-                </tr>
-                {field_rows}
-            </table>
-        </div>
-
-        <div class="grid">
-            <div class="card" style="border-top: 4px solid #38a169;">
-                <h4>📊 رفع بدل النقل الشهري للأساتذة:</h4>
-                <a href="/admin/download_template" style="display:inline-block; background:#4a5568; color:white; text-decoration:none; padding:8px 12px; border-radius:6px; font-size:13px; font-weight:bold; margin-bottom:10px; text-align:center;">📥 تنزيل نموذج بدل النقل</a>
+            <!-- قسم استيراد ملفات الإكسل -->
+            <div id="importExcelSec" class="card">
+                <h3 style="margin-top:0; color:#0d47a1;">📊 استيراد ملف الإكسل الشهري (الساعات وأيام الحضور)</h3>
                 <form method="POST" enctype="multipart/form-data">
                     <input type="hidden" name="action" value="upload_monthly_excel">
                     <input type="text" name="month_name" placeholder="اسم الشهر (مثال: كانون الثاني)" required>
                     <input type="file" name="monthly_excel" accept=".xlsx,.xls" required>
-                    <button type="submit" style="background:#38a169;">تحديث أيام النقل للشهر</button>
+                    <button type="submit" style="background:#2e7d32;">تحديث الحصص وأيام الحضور</button>
                 </form>
             </div>
 
-            <div class="card" style="border-top: 4px solid #2b6cb0;">
-                <h4>📢 إرسال تعميم للأساتذة:</h4>
+            <!-- قسم إرسال التعاميم والتنبيهات -->
+            <div id="sendNotifSec" class="card">
+                <h3 style="margin-top:0; color:#0d47a1;">📢 إرسال تعميم إداري أو تنبيه خاص</h3>
                 <form method="POST">
                     <input type="hidden" name="action" value="send_notification">
-                    <div class="autocomplete-container">
-                        <input type="text" id="notifSearchBox" placeholder="اكتب للبحث عن اسم أستاذ..." oninput="onNotifSearch()" autocomplete="off">
-                        <div id="notifSuggestions" class="suggestionsList"></div>
-                    </div>
-                    <input type="hidden" name="target_user" id="notifTargetUser" value="all" required>
-                    <div id="notifTargetDisplay" style="background:#edf2f7; padding:8px; border-radius:6px; font-size:13px; color:#2b6cb0; font-weight:bold; text-align:center;">🎯 المستهدف: إرسال لجميع الأساتذة</div>
-                    <textarea name="notification_text" placeholder="اكتب التعميم..." required style="width:100%; height:60px; padding:10px; border:1px solid #cbd5e0; border-radius:6px; font-family:inherit;"></textarea>
-                    <button type="submit" style="background:#2b6cb0;">📢 إرسال التنبيه</button>
+                    <select name="target_user" required>
+                        <option value="all">📢 تعميم عام لكل الأساتذة</option>
+                        {''.join([f'<option value="{u}">{t["name"]}</option>' for u,t in teachers_db.items()])}
+                    </select>
+                    <textarea name="notification_text" placeholder="اكتب نص التعميم الإداري..." required style="height:80px;"></textarea>
+                    <button type="submit">إرسال التعميم</button>
                 </form>
             </div>
 
-            <div class="card" style="border-top: 4px solid #4a5568;">
-                <h4>📄 رفع جدول التدريس (PDF):</h4>
-                <form method="POST" enctype="multipart/form-data">
-                    <input type="hidden" name="action" value="upload_pdf">
-                    <div class="autocomplete-container">
-                        <input type="text" id="pdfSearchBox" placeholder="اكتب اسم الأستاذ..." oninput="onPdfSearch()" autocomplete="off">
-                        <div id="pdfSuggestions" class="suggestionsList"></div>
-                    </div>
-                    <input type="hidden" name="target_user" id="pdfTargetUser" required>
-                    <div id="pdfTargetDisplay" style="background:#edf2f7; padding:8px; border-radius:6px; font-size:13px; color:#4a5568; font-weight:bold; text-align:center;">⚠️ اختر أستاذاً أولاً</div>
-                    <input type="file" name="pdf_file" accept=".pdf" required>
-                    <button type="submit" style="background:#4a5568;">رفع ملف PDF</button>
+            <!-- قسم تغيير كلمة السر -->
+            <div id="changePassSec" class="card">
+                <h3 style="margin-top:0; color:#0d47a1;">🔑 تغيير كلمة مرور الإدارة</h3>
+                <form method="POST">
+                    <input type="hidden" name="action" value="change_admin_password">
+                    <input type="password" name="new_password" placeholder="كلمة المرور الجديدة" required>
+                    <button type="submit" style="background:#c62828;">تحديث كلمة المرور</button>
                 </form>
             </div>
         </div>
 
-        <div class="card" style="border-top: 4px solid #dd6b20;">
-            <h3 style="margin-top:0; color:#c05621;">📥 إجابات ورسائل الأساتذة الواردة:</h3>
-            {replies_html}
-        </div>
-
-        <div class="card">
-            <h3 style="margin-top:0; color:#1a365d;">سجل الأساتذة الكامل وبدل النقل الشهري</h3>
-            <table>
-                <tr>
-                    <th>بيانات الأستاذ</th>
-                    <th>أيام ونقل الشهر</th>
-                    <th>جدول PDF</th>
-                    <th>إدارة</th>
-                </tr>
-                {rows}
-            </table>
-        </div>
-
-        <div class="designer-tag">🛠️ تم تصميم وتطوير البرنامج من قبل الأستاذ محمد حسين شمص</div>
+        <div style="text-align:center; margin-top:30px; color:#666; font-size:12.5px;">🛠️ تم تصميم وتطوير البرنامج من قبل الأستاذ محمد حسين شمص</div>
 
         <script>
-            const allTeachers = [
-                {{"username": "all", "name": "📢 إرسال لجميع الأساتذة (تعميم عام)", "subject": "الجميع"}},
-                {','.join([f'{{"username": "{u}", "name": "{t["name"]}", "subject": "{t["subject"]}"}}' for u, t in teachers_db.items()])}
-            ];
-            const teachersOnly = allTeachers.filter(t => t.username !== 'all');
-
-            function onNotifSearch() {{
-                let query = document.getElementById('notifSearchBox').value.trim().toLowerCase();
-                let listDiv = document.getElementById('notifSuggestions');
-                listDiv.innerHTML = '';
-                if (query === '') {{
-                    listDiv.style.display = 'none';
-                    document.getElementById('notifTargetUser').value = 'all';
-                    document.getElementById('notifTargetDisplay').innerText = "🎯 المستهدف: إرسال لجميع الأساتذة";
-                    return;
-                }}
-                let filtered = allTeachers.filter(t => t.name.toLowerCase().includes(query) || t.subject.toLowerCase().includes(query));
-                filtered.forEach(t => {{
-                    let item = document.createElement('div');
-                    item.className = 'suggestion-item';
-                    item.innerHTML = `<b>${{t.name}}</b> <small>(${{t.subject}})</small>`;
-                    item.onclick = function() {{
-                        document.getElementById('notifSearchBox').value = t.name;
-                        document.getElementById('notifTargetUser').value = t.username;
-                        document.getElementById('notifTargetDisplay').innerText = "🎯 المستهدف: " + t.name;
-                        listDiv.style.display = 'none';
-                    }};
-                    listDiv.appendChild(item);
-                }});
-                listDiv.style.display = 'block';
+            function showSection(secId) {{
+                document.querySelectorAll('.card').forEach(el => el.classList.remove('active'));
+                let target = document.getElementById(secId);
+                if(target) target.classList.add('active');
             }}
-
-            function onPdfSearch() {{
-                let query = document.getElementById('pdfSearchBox').value.trim().toLowerCase();
-                let listDiv = document.getElementById('pdfSuggestions');
-                listDiv.innerHTML = '';
-                if (query === '') {{
-                    listDiv.style.display = 'none';
-                    document.getElementById('pdfTargetUser').value = '';
-                    document.getElementById('pdfTargetDisplay').innerText = "⚠️ اختر أستاذاً أولاً";
-                    return;
-                }}
-                let filtered = teachersOnly.filter(t => t.name.toLowerCase().includes(query) || t.subject.toLowerCase().includes(query));
-                filtered.forEach(t => {{
-                    let item = document.createElement('div');
-                    item.className = 'suggestion-item';
-                    item.innerHTML = `<b>${{t.name}}</b> <small>(${{t.subject}})</small>`;
-                    item.onclick = function() {{
-                        document.getElementById('pdfSearchBox').value = t.name;
-                        document.getElementById('pdfTargetUser').value = t.username;
-                        document.getElementById('pdfTargetDisplay').innerText = "✅ الأستاذ المختار: " + t.name;
-                        listDiv.style.display = 'none';
-                    }};
-                    listDiv.appendChild(item);
-                }});
-                listDiv.style.display = 'block';
-            }}
-
-            document.addEventListener('click', function(e) {{
-                if (!e.target.closest('.autocomplete-container')) {{
-                    document.querySelectorAll('.suggestionsList').forEach(el => el.style.display = 'none');
-                }}
-            }});
         </script>
     </body>
     </html>
@@ -794,89 +453,41 @@ def admin_dashboard():
 
 @app.route('/teacher', methods=['GET', 'POST'])
 def teacher_dashboard():
-    if session.get('role') != 'teacher': return redirect(url_for('login'))
+    if session.get('role') != 'teacher':
+        return redirect(url_for('login'))
         
     username = session.get('username')
     user_data = teachers_db.get(username, {})
-    t_name = user_data.get('name', '')
-    t_subject = user_data.get('subject', '')
     msg = ''
 
     if request.method == 'POST':
         action = request.form.get('action')
-        if action == 'send_reply':
-            reply_msg = request.form.get('reply_message')
-            file = request.files.get('medical_report')
-            report_filename = None
-            if file and allowed_file(file.filename):
-                report_filename = secure_filename(f"report_{username}_{file.filename}")
-                file.save(os.path.join(app.config['UPLOAD_FOLDER'], report_filename))
-            
-            admin_replies.append({
-                'teacher_name': t_name,
-                'message': reply_msg,
-                'report': report_filename,
-                'date': datetime.now().strftime('%Y-%m-%d %H:%M')
-            })
+        
+        if action == 'submit_grades':
+            s_name = request.form.get('student_name').strip()
+            subject = user_data.get('subject', 'مادة تخصيصية')
+            grade_val = request.form.get('grade_val')
+            grades_db[f"{s_name} - ({subject})"] = grade_val
             save_to_disk()
-            msg = "تم إرسال رسالتك للإدارة بنجاح!"
+            msg = f"تم تسجيل علامة الطالب ({s_name}) بنجاح!"
+
+        elif action == 'submit_attendance':
+            class_name = request.form.get('class_name').strip()
+            absent_names = request.form.get('absent_names').strip()
+            date_key = pd.Timestamp.now().strftime('%Y-%m-%d')
+            attendance_db[f"صف: {class_name} ({date_key})"] = [absent_names] if absent_names else []
+            save_to_disk()
+            msg = f"تم توثيق غياب الطلاب لصف ({class_name}) بنجاح!"
 
     notifs_list = user_data.get('notifications', [])
-    notifs_html = "".join([f"<div class='notif-box'>🔔 <b>تعميم:</b> {n}</div>" for n in notifs_list])
-    pdf_html = f"<a href='/uploads/{user_data['schedule_pdf']}' class='btn-pdf' target='_blank'>📄 تحميل جدول الحصص PDF</a>" if user_data.get('schedule_pdf') else "لم يتم رفع جدول الحصص بعد."
+    notifs_html = "".join([f"<div style='background:#e3f2fd; border-right:4px solid #1565c0; padding:10px; margin-bottom:6px; font-weight:bold; color:#0d47a1;'>🔔 {n}</div>" for n in notifs_list])
     
-    my_sessions = [s for s in field_sessions if s.get('academic_year') == current_academic_year and (s['primary_teacher'] == t_name or s['secondary_teacher'] == t_name)]
-    
-    sessions_html = ""
-    for s in my_sessions:
-        if s['status'] == 'قيد التدريب':
-            matching_students = [st for st in students_db if st.get('academic_year') == current_academic_year and st['class'] == s['class_name'] and st['major'] == s['major']]
-            
-            students_list_html = ""
-            for st in matching_students:
-                students_list_html += f'''
-                <li style="display:flex; justify-content:space-between; align-items:center; padding:8px; border-bottom:1px solid #edf2f7;">
-                    <span>{st['name']} <small style="color:#718096;">({st['phone']})</small></span>
-                    <div>
-                        <input type="checkbox" class="btn-check" id="st_{st['id']}" checked autocomplete="off">
-                        <label class="btn btn-outline-success btn-sm" for="st_{st['id']}" onclick="toggleStatus(this)" style="padding:4px 12px; cursor:pointer;">حاضر</label>
-                    </div>
-                </li>
-                '''
-            if not students_list_html: students_list_html = "<p style='color:red; font-size:13px;'>لا توجد أسماء طلاب مرفوعة لهذا الصف والاختصاص عبر إكسل المديرية بعد.</p>"
+    total_hours = sum([v.get('hours', 0) for v in user_data.get('monthly_data', {}).values()])
+    total_days = sum([v.get('days', 0) for v in user_data.get('monthly_data', {}).values()])
+    contract_total = user_data.get('contract_hours', 0)
+    remaining_hours = max(0, contract_total - total_hours)
 
-            sessions_html += f'''
-            <div style="background:#f7fafc; border:1.5px solid #cbd5e0; padding:15px; border-radius:8px; margin-bottom:15px;">
-                <h4 style="margin:0 0 10px 0; color:#2b6cb0;">📍 مكان التدريب: {s['location']}</h4>
-                <p style="font-size:14px; margin:5px 0;"><b>الصف:</b> {s['class_name']} | <b>الاختصاص:</b> {s['major']}</p>
-                <ul style="list-style:none; padding:0; max-height:180px; overflow-y:auto; background:white; border:1px solid #cbd5e0; border-radius:6px; margin-bottom:10px;">
-                    {students_list_html}
-                </ul>
-                <button type="button" onclick="submitAttendance({s['id']}, '{t_name}', '{s['location']}')" style="background:#38a169; color:white; border:none; padding:10px; width:100%; border-radius:6px; font-weight:bold; cursor:pointer;">إرسال غياب التدريب الميداني (GPS)</button>
-            </div>
-            '''
-        else:
-            sessions_html += f'''
-            <div style="background:#f0fff4; border:1.5px solid #38a169; padding:15px; border-radius:8px; margin-bottom:15px;">
-                <h4 style="margin:0; color:#22543d;">✔ تم إرسال تقرير التدريب لـ ({s['location']}) مسبقاً</h4>
-            </div>
-            '''
-    if not sessions_html: sessions_html = "<p style='color:#718096;'>لا توجد جلسات تدريب ميداني مكلف بها حالياً.</p>"
-
-    monthly_rows = ""
-    total_transport_days = 0
-    for m, val in user_data.get('monthly_data', {}).items():
-        d = val.get('days', 0)
-        total_transport_days += d
-        monthly_rows += f"<tr><td><b>{m}</b></td><td><span style='color:#38a169; font-weight:bold;'>{d} يوم</span></td></tr>"
-    if not monthly_rows: monthly_rows = "<tr><td colspan='2'>لم تُرفع بيانات النقل بعد.</td></tr>"
-
-    # جلب المواد والصفوف المخصصة حصرياً لهذا الأستاذ من ملف التوزيع
-    my_assigned_courses = [a for a in teacher_assignments if a.get('academic_year') == current_academic_year and a['teacher_name'] == t_name]
-    
-    courses_select_options = ""
-    for ac in my_assigned_courses:
-        courses_select_options += f"<option value='{ac['class_name']}|{ac['major']}|{ac['subject']}'>الصف: {ac['class_name']} | الاختصاص: {ac['major']} | المادة: {ac['subject']}</option>"
+    pdf_link = f"<a href='/uploads/{user_data['schedule_pdf']}' target='_blank' style='background:#0d47a1; color:white; padding:8px 12px; border-radius:5px; text-decoration:none; font-weight:bold;'>📄 عرض جدول الحصص PDF</a>" if user_data.get('schedule_pdf') else "لم يرفع الجدول بعد"
 
     return f'''
     <!DOCTYPE html>
@@ -884,335 +495,86 @@ def teacher_dashboard():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>معهد الهرمل الفني - بطاقة الأستاذ</title>
+        <title>صفحة الأستاذ - معهد الهرمل الفني</title>
         {PWA_HEAD}
         <style>
-            body {{ font-family: system-ui, sans-serif; background: #f7fafc; margin: 0; padding: 15px; color: #2d3748; }}
-            .navbar {{ background: #1a365d; color: white; padding: 15px; border-radius: 10px; display: flex; justify-content: space-between; align-items: center; }}
-            .card {{ background: white; padding: 20px; border-radius: 12px; margin-top: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }}
-            .info-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 10px; }}
-            .info-item {{ background: #edf2f7; padding: 10px 14px; border-radius: 8px; font-size: 13.5px; line-height: 1.6; }}
-            .info-item b {{ color: #1a365d; }}
-            .notif-box {{ background: #ebf8ff; border-right: 4px solid #3182ce; color: #2b6cb0; padding: 12px; margin-bottom: 8px; border-radius: 6px; font-weight: bold; }}
-            .btn-pdf {{ display: inline-block; background: #2b6cb0; color: white; padding: 10px 15px; border-radius: 6px; text-decoration: none; font-weight: bold; }}
-            table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
-            th, td {{ border: 1px solid #e2e8f0; padding: 10px; text-align: center; font-size: 14px; }}
-            th {{ background: #2b6cb0; color: white; }}
-            button {{ background: #38a169; color: white; border: none; padding: 10px 15px; border-radius: 6px; font-weight: bold; cursor: pointer; }}
-            .designer-tag {{ margin-top: 30px; color: #718096; font-size: 13px; font-weight: 500; text-align: center; border-top: 1px solid #cbd5e0; padding-top: 15px; }}
-            #smoothBanner {{ display: none; background: linear-gradient(90deg, #1e3a8a, #2563eb); color: white; padding: 12px 18px; border-radius: 10px; margin-top: 12px; box-shadow: 0 4px 12px rgba(37,99,235,0.25); font-size: 14px; line-height: 1.5; }}
+            body {{ font-family: system-ui, sans-serif; background: #f4f6f9; margin: 0; padding-bottom:30px; }}
+            .card {{ background: white; padding: 18px; border-radius: 8px; margin-top: 15px; box-shadow: 0 2px 6px rgba(0,0,0,0.05); border-top: 4px solid #0d47a1; }}
+            .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; }}
+            input, textarea, button {{ padding: 10px; border: 1px solid #ccc; border-radius: 5px; text-align: right; font-size: 14px; width: 100%; box-sizing: border-box; margin-top: 6px; font-family: inherit; }}
+            button {{ background: #0d47a1; color: white; font-weight: bold; cursor: pointer; border: none; }}
+            .sum-card {{ flex: 1; background: #e3f2fd; padding: 12px; border-radius: 6px; text-align: center; border:1px solid #bbdefb; }}
         </style>
     </head>
     <body>
-        <div class="navbar">
-            <h3 style="margin:0;">معهد الهرمل الفني</h3>
-            <span style="font-size:14px;">أهلاً بك أستاذ: {user_data.get('name')} | <a href="/logout" style="color:#feb2b2; text-decoration:none; font-weight:bold;">خروج</a></span>
+        <div style="background:#0d47a1; color:white; padding:12px 20px; display:flex; justify-content:space-between; align-items:center;">
+            <div>
+                <h3 style="margin:0; font-size:16px;">المديرية العامة للتعليم المهني والتقني</h3>
+                <small style="color:#bbdefb;">الأستاذ: {user_data.get('name')} ({user_data.get('subject')})</small>
+            </div>
+            <a href="/logout" style="color:#ffcdd2; text-decoration:none; font-weight:bold; background:#c62828; padding:6px 12px; border-radius:4px; font-size:12px;">خروج</a>
         </div>
 
-        <div id="smoothBanner">
-            ⚡ <b>تعميم إداري جديد:</b> <span id="bannerText"></span>
-        </div>
+        <div style="padding:15px;">
+            {f'<div style="background:#e8f5e9; color:#2e7d32; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold;">{msg}</div>' if msg else ''}
 
-        {f'<div style="background:#c6f6d5; color:#22543d; padding:10px; border-radius:6px; margin-top:10px; font-weight:bold;">{msg}</div>' if msg else ''}
+            <div class="card">
+                <h4 style="margin-top:0; color:#0d47a1;">📢 التعاميم والتنبيهات الواردة من مدير المعهد:</h4>
+                {notifs_html if notifs_html else '<p style="color:#666;">لا توجد تعاميم جديدة.</p>'}
+            </div>
 
-        <div class="card">
-            <h4>📩 التعاميم والتنبيهات الواردة:</h4>
-            <div id="notifContent">{notifs_html if notifs_html else '<p style="color:#718096;">لا توجد تعاميم حالياً.</p>'}</div>
-        </div>
-
-        <!-- نظام إدخال العلامات المقيد حصرياً بالمواد والصفوف المرفوعة عبر إكسل التوزيع -->
-        <div class="card" style="border-top: 4px solid #319795;">
-            <h3 style="margin-top:0; color:#2c7a7b;">📝 سجل ورصد العلامات (موادك المخصصة):</h3>
-            {f'''
-            <form action="/teacher/grades_page" method="GET" style="display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end;">
-                <div style="flex:2; min-width:250px;">
-                    <label style="font-size:12px;">اختر المادة والصف والاختصاص:</label>
-                    <select name="course_key" required style="width:100%; padding:10px; border:1px solid #cbd5e0; border-radius:6px;">
-                        <option value="">-- اختر من موادك المعتمدة --</option>
-                        {courses_select_options}
-                    </select>
+            <div class="card">
+                <h4 style="margin-top:0; color:#0d47a1;">📊 الساعات المنفذة وأيام الدوام (المعتمدة):</h4>
+                <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                    <div class="sum-card">الساعات المنفذة: <br><b style="font-size:18px; color:#0d47a1;">{total_hours} حصة</b></div>
+                    <div class="sum-card">أيام الحضور: <br><b style="font-size:18px; color:#2e7d32;">{total_days} يوم</b></div>
+                    <div class="sum-card">المتبقي من العقد: <br><b style="font-size:18px; color:#c62828;">{remaining_hours} ساعة</b></div>
                 </div>
-                <div style="flex:1; min-width:150px;">
-                    <label style="font-size:12px;">نوع التقييم:</label>
-                    <select name="exam_type" required style="width:100%; padding:10px; border:1px solid #cbd5e0; border-radius:6px;">
-                        <option value="سعي أول">سعي أول</option>
-                        <option value="فصل أول">فصل أول</option>
-                        <option value="سعي ثان">سعي ثان</option>
-                        <option value="فصل أخير / نهائي">فصل أخير / نهائي</option>
-                    </select>
-                </div>
-                <div>
-                    <button type="submit" style="background:#319795; padding:10px 20px;">فتح نافذة الرصد</button>
-                </div>
-            </form>
-            ''' if courses_select_options else '<p style="color:#e53e3e; font-size:13px;">⚠️ لم تقم الإدارة برفع ملف "توزيع المواد والأساتذة" بعد أو لم يتم إسناد مواد لك.</p>'}
-        </div>
+            </div>
 
-        <div class="card" style="border-top: 4px solid #805ad5;">
-            <h3 style="margin-top:0; color:#553c9a;">🏥 جلسات التدريب الميداني الخاص بك:</h3>
-            {sessions_html}
-        </div>
+            <div class="card">
+                <h4 style="margin-top:0; color:#0d47a1;">📅 جدول التدريس الأسبوعي الخاص بك:</h4>
+                {pdf_link}
+            </div>
 
-        <div class="card" style="border-top: 4px solid #2b6cb0;">
-            <h4 style="margin-top:0; color:#1a365d; border-bottom:2px solid #edf2f7; padding-bottom:8px;">📋 معلوماتك الإدارية:</h4>
-            <div class="info-grid">
-                <div class="info-item"><b>الاسم الثلاثي:</b> {user_data.get('name')}</div>
-                <div class="info-item"><b>رقم الهاتف:</b> {user_data.get('phone')}</div>
-                <div class="info-item"><b>الوضع الوظيفي:</b> {user_data.get('job_status')}</div>
+            <div class="grid">
+                <!-- إدخال العلامات -->
+                <div class="card">
+                    <h4 style="margin-top:0; color:#0d47a1;">📝 إدخال علامات طلابك (مادة: {user_data.get('subject')}):</h4>
+                    <form method="POST">
+                        <input type="hidden" name="action" value="submit_grades">
+                        <input type="text" name="student_name" placeholder="اسم الطالب الثلاثي والصف" required>
+                        <input type="number" step="0.5" name="grade_val" placeholder="العلامة من 20" required>
+                        <button type="submit">حفظ العلامة</button>
+                    </form>
+                </div>
+
+                <!-- توثيق حضور وغياب الطلاب -->
+                <div class="card">
+                    <h4 style="margin-top:0; color:#0d47a1;">📋 توثيق حضور وغياب الطلاب اليومي:</h4>
+                    <form method="POST">
+                        <input type="hidden" name="action" value="submit_attendance">
+                        <input type="text" name="class_name" placeholder="اسم الصف والشعبة (مثال: BP1 الكترونيك)" required>
+                        <textarea name="absent_names" placeholder="اكتب أسماء الطلاب الغائبين اليوم..." style="height:60px;"></textarea>
+                        <button type="submit" style="background:#2e7d32;">تأكيد وحفظ الغياب</button>
+                    </form>
+                </div>
             </div>
         </div>
 
-        <div class="card">
-            <h4 style="margin-top:0; color:#1a365d;">🚌 سجل بدل النقل الشهري:</h4>
-            <table>
-                <tr>
-                    <th>الشهر</th>
-                    <th>عدد أيام الحضور المسجلة</th>
-                </tr>
-                {monthly_rows}
-            </table>
-            <p style="margin-top:10px; text-align:left; font-size:14px; color:#2b6cb0;"><b>إجمالي أيام النقل المسجلة:</b> {total_transport_days} يوم</p>
-        </div>
-
-        <div class="card">
-            <h4 style="margin-top:0; color:#1a365d;">📅 جدول التدريس الأسبوعي:</h4>
-            {pdf_html}
-        </div>
-
-        <div class="card">
-            <h4 style="margin-top:0; color:#1a365d;">💬 إرسال رسالة أو عذر للإدارة:</h4>
-            <form method="POST" enctype="multipart/form-data">
-                <input type="hidden" name="action" value="send_reply">
-                <textarea name="reply_message" placeholder="اكتب رسالتك..." required style="width:100%; height:70px; padding:10px; border:1px solid #cbd5e0; border-radius:6px; box-sizing:border-box; margin-bottom:10px;"></textarea>
-                <input type="file" name="medical_report" accept=".pdf,.png,.jpg,.jpeg" style="margin-bottom:10px;"><br>
-                <button type="submit" style="background:#2b6cb0;">إرسال للإدارة</button>
-            </form>
-        </div>
-
-        <div class="designer-tag">🛠️ تم تصميم وتطوير البرنامج من قبل الأستاذ محمد حسين شمص</div>
-
-        <script>
-            let currentNotifCount = {len(notifs_list)};
-            let audioCtx = null;
-
-            function toggleStatus(label) {{
-                setTimeout(() => {{
-                    let checkbox = document.getElementById(label.getAttribute('for'));
-                    if (checkbox.checked) {{
-                        label.style.backgroundColor = "";
-                        label.style.color = "";
-                        label.innerText = "حاضر";
-                    }} else {{
-                        label.style.backgroundColor = "#e53e3e";
-                        label.style.color = "white";
-                        label.innerText = "غائب";
-                    }}
-                }}, 50);
-            }}
-
-            function submitAttendance(sessionId, teacherName, locationName) {{
-                if (!navigator.geolocation) {{
-                    alert("متصفحك لا يدعم الـ GPS");
-                    return;
-                }}
-                navigator.geolocation.getCurrentPosition(function(position) {{
-                    let attendance = {{}};
-                    document.querySelectorAll('input[id^="st_"]').forEach(cb => {{
-                        let studentId = cb.id.replace('st_', '');
-                        let label = document.querySelector(`label[for="st_${{studentId}}"]`);
-                        let studentName = label.parentElement.previousElementSibling.innerText.split('(')[0].trim();
-                        attendance[studentName] = cb.checked ? "حاضر" : "غائب";
-                    }});
-
-                    fetch('/teacher/submit_field_attendance', {{
-                        method: 'POST',
-                        headers: {{ 'Content-Type': 'application/json' }},
-                        body: JSON.stringify({{
-                            session_id: sessionId,
-                            sender_name: teacherName,
-                            location: locationName,
-                            attendance: attendance,
-                            lat: position.coords.latitude,
-                            lng: position.coords.longitude
-                        }})
-                    }})
-                    .then(res => res.json())
-                    .then(data => {{
-                        alert(data.message);
-                        if(data.success) location.reload();
-                    }});
-                }}, function(error) {{
-                    alert("يرجى تفعيل الـ GPS لتأكيد موقع التدريب الميداني.");
-                }}, {{ enableHighAccuracy: true }});
-            }}
-
-            setInterval(() => {{
-                fetch('/api/check_notifications')
-                    .then(res => res.json())
-                    .then(data => {{
-                        if (data.count > currentNotifCount) {{
-                            currentNotifCount = data.count;
-                            document.getElementById('bannerText').innerText = data.latest;
-                            document.getElementById('smoothBanner').style.display = 'block';
-                        }}
-                    }});
-            }}, 10000);
-        </script>
+        <div style="text-align:center; margin-top:20px; color:#666; font-size:12.5px;">🛠️ تم تصميم وتطوير البرنامج من قبل الأستاذ محمد حسين شمص</div>
     </body>
     </html>
     '''
 
-# صفحة إدخال ورصد العلامات المقيدة بمواد الأستاذ المرفوعة عبر جدول التوزيع
-@app.route('/teacher/grades_page', methods=['GET', 'POST'])
-def teacher_grades_page():
-    if session.get('role') != 'teacher': return redirect(url_for('login'))
-    
-    username = session.get('username')
-    user_data = teachers_db.get(username, {})
-    t_name = user_data.get('name', '')
+@app.route('/uploads/<filename>')
+def uploaded_file(filename):
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
-    course_key = request.args.get('course_key') or request.form.get('course_key')
-    if not course_key: return redirect(url_for('teacher_dashboard'))
-    
-    parts = course_key.split('|')
-    if len(parts) != 3: return redirect(url_for('teacher_dashboard'))
-    class_name, major, subject = parts[0], parts[1], parts[2]
-
-    # التحقق الأمني: هل هذه المادة مسندة حقاً لهذا الأستاذ في ملف التوزيع؟
-    is_authorized = any(a['academic_year'] == current_academic_year and a['teacher_name'] == t_name and a['class_name'] == class_name and a['major'] == major and a['subject'] == subject for a in teacher_assignments)
-    if not is_authorized:
-        return "<h3 style='text-align:center; color:red; margin-top:50px;'>عذراً، أنت غير مصرح لك برصد علامات هذه المادة لعدم وجودها في جدول التوزيع الإداري.</h3>"
-
-    exam_type = request.args.get('exam_type') or request.form.get('exam_type', 'سعي أول')
-
-    if request.method == 'POST':
-        for key, val in request.form.items():
-            if key.startswith('grade_'):
-                student_name = key.replace('grade_', '').replace('_', ' ')
-                try: grade_val = float(val)
-                except: grade_val = 0.0
-                
-                existing = next((g for g in grades_db if g['academic_year'] == current_academic_year and g['teacher'] == t_name and g['student_name'] == student_name and g['subject'] == subject and g['exam_type'] == exam_type), None)
-                
-                if existing:
-                    existing['grade'] = grade_val
-                else:
-                    grades_db.append({
-                        "academic_year": current_academic_year,
-                        "teacher": t_name,
-                        "subject": subject,
-                        "class_name": class_name,
-                        "major": major,
-                        "exam_type": exam_type,
-                        "student_name": student_name,
-                        "grade": grade_val
-                    })
-        save_to_disk()
-        return f'''
-        <script>
-            alert("تم حفظ وتثبيت العلامات بنجاح لمادة ({subject})!");
-            window.location.href = "/teacher";
-        </script>
-        '''
-
-    # جلب طلاب هذا الصف والاختصاص فقط
-    filtered_students = [st for st in students_db if st.get('academic_year') == current_academic_year and st['class'] == class_name and st['major'] == major]
-
-    student_rows = ""
-    for st in filtered_students:
-        s_name = st['name']
-        saved_g = next((g['grade'] for g in grades_db if g['academic_year'] == current_academic_year and g['teacher'] == t_name and g['student_name'] == s_name and g['subject'] == subject and g['exam_type'] == exam_type), "")
-        safe_key_name = s_name.replace(' ', '_')
-        
-        student_rows += f'''
-        <tr>
-            <td>{s_name}</td>
-            <td>{st['phone']}</td>
-            <td>
-                <input type="number" step="0.5" min="0" max="20" name="grade_{safe_key_name}" value="{saved_g}" placeholder="من 20" style="padding:8px; width:120px; text-align:center; border:1px solid #cbd5e0; border-radius:6px;">
-            </td>
-        </tr>
-        '''
-    if not student_rows: student_rows = "<tr><td colspan='3'>لا توجد أسماء طلاب مسجلة لهذا الصف والاختصاص عبر إكسل المديرية.</td></tr>"
-
-    return f'''
-    <!DOCTYPE html>
-    <html lang="ar" dir="rtl">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>رصد العلامات - {subject}</title>
-        {PWA_HEAD}
-        <style>
-            body {{ font-family: system-ui, sans-serif; background: #f7fafc; margin: 0; padding: 20px; color: #2d3748; }}
-            .card {{ background: white; padding: 25px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); max-width: 800px; margin: 0 auto; }}
-            table {{ width: 100%; border-collapse: collapse; margin-top: 15px; }}
-            th, td {{ border: 1px solid #e2e8f0; padding: 10px; text-align: center; }}
-            th {{ background: #2b6cb0; color: white; }}
-            button {{ background: #38a169; color: white; border: none; padding: 12px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; margin-top: 15px; width: 100%; font-size: 16px; }}
-            .back-btn {{ display: inline-block; background: #4a5568; color: white; text-decoration: none; padding: 8px 15px; border-radius: 6px; margin-bottom: 15px; font-size: 13px; }}
-        </style>
-    </head>
-    <body>
-        <div class="card">
-            <a href="/teacher" class="back-btn">⬅ عودة لوحة التحكم</a>
-            <h2 style="margin-top:0; color:#1a365d;">📝 رصد علامات الطلاب</h2>
-            <div style="background:#ebf8ff; padding:12px; border-radius:8px; margin-bottom:15px; font-size:14px; color:#2b6cb0;">
-                <b>الأستاذ:</b> {t_name} | <b>المادة:</b> {subject}<br>
-                <b>الصف:</b> {class_name} | <b>الاختصاص:</b> {major} | <b>نوع التقييم:</b> {exam_type}
-            </div>
-            
-            <form method="POST">
-                <input type="hidden" name="course_key" value="{course_key}">
-                <input type="hidden" name="exam_type" value="{exam_type}">
-                <table>
-                    <tr>
-                        <th>اسم الطالب الثلاثي</th>
-                        <th>رقم الهاتف</th>
-                        <th>العلامة المرصودة</th>
-                    </tr>
-                    {student_rows}
-                </table>
-                <button type="submit">حفظ وتثبيت العلامات للإدارة</button>
-            </form>
-        </div>
-    </body>
-    </html>
-    '''
-
-@app.route('/teacher/submit_field_attendance', methods=['POST'])
-def submit_field_attendance():
-    if session.get('role') != 'teacher': return jsonify({"success": False, "message": "غير مصرح"}), 403
-    
-    data = request.json
-    session_id = int(data.get('session_id'))
-    sender_name = data.get('sender_name')
-    location_name = data.get('location')
-    attendance = data.get('attendance')
-    user_lat = float(data.get('lat'))
-    user_lng = float(data.get('lng'))
-
-    if location_name in TRAINING_LOCATIONS:
-        loc_data = TRAINING_LOCATIONS[location_name]
-        distance = calculate_distance(user_lat, user_lng, loc_data['lat'], loc_data['lng'])
-        if distance > loc_data['radius_meters']:
-            return jsonify({
-                "success": False, 
-                "message": f"عذراً! أنت خارج نطاق موقع ({location_name}). المسافة الحالية هي {int(distance)} متر والنطاق المسموح هو {loc_data['radius_meters']} متر."
-            }), 400
-
-    session_item = next((s for s in field_sessions if s['id'] == session_id), None)
-    if session_item:
-        if session_item['status'] == "مكتملة":
-            return jsonify({"success": False, "message": "تم إرسال تقرير الغياب لهذه الجلسة مسبقاً!"}), 400
-
-        session_item['attendance'] = attendance
-        session_item['submitted_by'] = sender_name
-        session_item['status'] = "مكتملة"
-        save_to_disk()
-        return jsonify({"success": True, "message": "تم التحقق الجغرافي بالـ GPS بنجاح وحفظ الحضور!"})
-    
-    return jsonify({"success": False, "message": "الجلسة غير متوفرة"}), 400
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
