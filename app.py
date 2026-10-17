@@ -324,9 +324,6 @@ def admin_dashboard():
         </tr>
         """
 
-    active_teachers_opts = '<option value="all" style="background:#2b6cb0; color:white; font-weight:bold;">📢 إرسال لجميع الأساتذة (تعميم عام)</option>'
-    active_teachers_opts += "".join([f'<option value="{u}">{t["name"]} ({t["subject"]})</option>' for u,t in teachers_db.items()])
-
     return f'''
     <!DOCTYPE html>
     <html lang="ar" dir="rtl">
@@ -627,11 +624,7 @@ def teacher_dashboard():
                 <div class="info-item"><b>تاريخ الميلاد:</b> {user_data.get('dob')}</div>
                 <div class="info-item"><b>رقم السجل:</b> {user_data.get('register_no')}</div>
                 <div class="info-item"><b>القضاء / بلدة النفوس:</b> {user_data.get('district')} / {user_data.get('town')}</div>
-                <div class="info-item"><b>العنوان الحالي:</b> {user_data.get('address')}</div>
-                <div class="info-item"><b>الوضع العائلي:</b> {user_data.get('marital_status')} (الأولاد: {user_data.get('children_count')})</div>
                 <div class="info-item"><b>الوضع الوظيفي:</b> {user_data.get('job_status')}</div>
-                <div class="info-item"><b>تاريخ المباشرة:</b> {user_data.get('start_date')}</div>
-                <div class="info-item"><b>الشهادة العلمية:</b> {user_data.get('degree')}</div>
                 <div class="info-item"><b>المادة التي يدرّسها:</b> {user_data.get('subject')}</div>
                 <div class="info-item"><b>مجموع ساعات العقود:</b> {contract_total} ساعة</div>
                 <div class="info-item"><b>رقم الهاتف:</b> {user_data.get('phone')}</div>
@@ -739,7 +732,7 @@ def uploaded_file(filename):
 @app.route('/logout')
 def logout():
     session.clear()
-    return redirect(url_for('logout'))
+    return redirect(url_for('login'))
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
