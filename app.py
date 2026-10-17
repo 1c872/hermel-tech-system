@@ -276,7 +276,7 @@ def admin_dashboard():
                 filename = secure_filename(f"schedule_{target_user}.pdf")
                 file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
                 teachers_db[target_user]['schedule_pdf'] = filename
-                msg = "تم رفع جدول التدريس PDF بنجاح."
+                msg = f"تم رفع جدول التدريس PDF بنجاح للأستاذ {teachers_db[target_user]['name']}."
 
     replies_html = ""
     for idx, r in enumerate(reversed(admin_replies)):
@@ -347,7 +347,7 @@ def admin_dashboard():
             .designer-tag {{ margin-top: 30px; color: #718096; font-size: 13px; font-weight: 500; text-align: center; border-top: 1px solid #cbd5e0; padding-top: 15px; }}
             
             .autocomplete-container {{ position: relative; width: 100%; }}
-            #suggestionsList {{
+            .suggestionsList {{
                 position: absolute;
                 top: 100%;
                 left: 0; right: 0;
@@ -416,13 +416,13 @@ def admin_dashboard():
                     
                     <label style="font-size:12px; color:#4a5568; font-weight:bold;">🔍 اكتب اسم الأستاذ للبحث الفوري:</label>
                     <div class="autocomplete-container">
-                        <input type="text" id="teacherSearchBox" placeholder="اكتب للبحث عن الاسم..." oninput="onSearchInput()" autocomplete="off" style="margin:0;">
-                        <div id="suggestionsList"></div>
+                        <input type="text" id="notifSearchBox" placeholder="اكتب للبحث عن الاسم..." oninput="onNotifSearch()" autocomplete="off" style="margin:0;">
+                        <div id="notifSuggestions" class="suggestionsList"></div>
                     </div>
                     
-                    <input type="hidden" name="target_user" id="selectedTeacherUsername" value="all" required>
+                    <input type="hidden" name="target_user" id="notifTargetUser" value="all" required>
                     
-                    <div id="selectedTeacherDisplay" style="background:#edf2f7; padding:8px; border-radius:6px; font-size:13px; color:#2b6cb0; font-weight:bold; text-align:center;">
+                    <div id="notifTargetDisplay" style="background:#edf2f7; padding:8px; border-radius:6px; font-size:13px; color:#2b6cb0; font-weight:bold; text-align:center;">
                         🎯 المستهدف حالياً: إرسال لجميع الأساتذة (تعميم عام)
                     </div>
                     
@@ -432,15 +432,26 @@ def admin_dashboard():
                 </form>
             </div>
 
-            <div class="card">
+            <div class="card" style="border-top: 4px solid #4a5568;">
                 <h4>📄 رفع جدول التدريس (PDF):</h4>
                 <form method="POST" enctype="multipart/form-data">
                     <input type="hidden" name="action" value="upload_pdf">
-                    <select name="target_user" required>
-                        {''.join([f'<option value="{u}">{t["name"]} ({t["subject"]})</option>' for u,t in teachers_db.items()])}
-                    </select>
+                    
+                    <label style="font-size:12px; color:#4a5568; font-weight:bold;">🔍 ابحث عن الأستاذ لرفع الجدول:</label>
+                    <div class="autocomplete-container">
+                        <input type="text" id="pdfSearchBox" placeholder="اكتب اسم الأستاذ..." oninput="onPdfSearch()" autocomplete="off" style="margin:0;">
+                        <div id="pdfSuggestions" class="suggestionsList"></div>
+                    </div>
+                    
+                    <input type="hidden" name="target_user" id="pdfTargetUser" required>
+                    
+                    <div id="pdfTargetDisplay" style="background:#edf2f7; padding:8px; border-radius:6px; font-size:13px; color:#4a5568; font-weight:bold; text-align:center;">
+                        ⚠️ يرجى اختيار أستاذ أولاً
+                    </div>
+
+                    <label style="font-size:12px; color:#4a5568;">اختر ملف PDF:</label>
                     <input type="file" name="pdf_file" accept=".pdf" required>
-                    <button type="submit" style="background:#4a5568;">رفع ملف PDF</button>
+                    <button type="submit" style="background:#4a5568;">رفع ملف PDF للأستاذ</button>
                 </form>
             </div>
         </div>
@@ -467,15 +478,18 @@ def admin_dashboard():
                 {','.join([f'{{"username": "{u}", "name": "{t["name"]}", "subject": "{t["subject"]}"}}' for u, t in teachers_db.items()])}
             ];
 
-            function onSearchInput() {{
-                let query = document.getElementById('teacherSearchBox').value.trim().toLowerCase();
-                let listDiv = document.getElementById('suggestionsList');
+            const teachersOnly = allTeachers.filter(t => t.username !== 'all');
+
+            // بحث التنبيهات
+            function onNotifSearch() {{
+                let query = document.getElementById('notifSearchBox').value.trim().toLowerCase();
+                let listDiv = document.getElementById('notifSuggestions');
                 listDiv.innerHTML = '';
 
                 if (query === '') {{
                     listDiv.style.display = 'none';
-                    document.getElementById('selectedTeacherUsername').value = 'all';
-                    document.getElementById('selectedTeacherDisplay').innerText = "🎯 المستهدف حالياً: إرسال لجميع الأساتذة (تعميم عام)";
+                    document.getElementById('notifTargetUser').value = 'all';
+                    document.getElementById('notifTargetDisplay').innerText = "🎯 المستهدف حالياً: إرسال لجميع الأساتذة (تعميم عام)";
                     return;
                 }}
 
@@ -491,9 +505,45 @@ def admin_dashboard():
                     item.className = 'suggestion-item';
                     item.innerHTML = `<b>${{t.name}}</b> <small style="color:#718096;">(${{t.subject}})</small>`;
                     item.onclick = function() {{
-                        document.getElementById('teacherSearchBox').value = t.name;
-                        document.getElementById('selectedTeacherUsername').value = t.username;
-                        document.getElementById('selectedTeacherDisplay').innerText = "🎯 المستهدف: " + t.name;
+                        document.getElementById('notifSearchBox').value = t.name;
+                        document.getElementById('notifTargetUser').value = t.username;
+                        document.getElementById('notifTargetDisplay').innerText = "🎯 المستهدف: " + t.name;
+                        listDiv.style.display = 'none';
+                    }};
+                    listDiv.appendChild(item);
+                }});
+
+                listDiv.style.display = 'block';
+            }}
+
+            // بحث جدول الـ PDF
+            function onPdfSearch() {{
+                let query = document.getElementById('pdfSearchBox').value.trim().toLowerCase();
+                let listDiv = document.getElementById('pdfSuggestions');
+                listDiv.innerHTML = '';
+
+                if (query === '') {{
+                    listDiv.style.display = 'none';
+                    document.getElementById('pdfTargetUser').value = '';
+                    document.getElementById('pdfTargetDisplay').innerText = "⚠️ يرجى اختيار أستاذ أولاً";
+                    return;
+                }}
+
+                let filtered = teachersOnly.filter(t => t.name.toLowerCase().includes(query) || t.subject.toLowerCase().includes(query));
+
+                if (filtered.length === 0) {{
+                    listDiv.style.display = 'none';
+                    return;
+                }}
+
+                filtered.forEach(t => {{
+                    let item = document.createElement('div');
+                    item.className = 'suggestion-item';
+                    item.innerHTML = `<b>${{t.name}}</b> <small style="color:#718096;">(${{t.subject}})</small>`;
+                    item.onclick = function() {{
+                        document.getElementById('pdfSearchBox').value = t.name;
+                        document.getElementById('pdfTargetUser').value = t.username;
+                        document.getElementById('pdfTargetDisplay').innerText = "✅ الأستاذ المختار: " + t.name;
                         listDiv.style.display = 'none';
                     }};
                     listDiv.appendChild(item);
@@ -504,7 +554,7 @@ def admin_dashboard():
 
             document.addEventListener('click', function(e) {{
                 if (!e.target.closest('.autocomplete-container')) {{
-                    document.getElementById('suggestionsList').style.display = 'none';
+                    document.querySelectorAll('.suggestionsList').forEach(el => el.style.display = 'none');
                 }}
             }});
         </script>
