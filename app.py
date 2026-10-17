@@ -1,4 +1,5 @@
 import os
+import json
 import random
 import string
 import io
@@ -14,12 +15,46 @@ ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'xlsx', 'xls'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+DB_FILE = 'database.json'
+
 teachers_db = {}
 admin_replies = []
 admin_credentials = {'username': 'admin', 'password': '123456'}
 
+def save_to_disk():
+    """حفظ قاعدة البيانات والرسائل وكلمة المرور في ملف JSON دائم"""
+    try:
+        data = {
+            'teachers_db': teachers_db,
+            'admin_replies': admin_replies,
+            'admin_credentials': admin_credentials
+        }
+        with open(DB_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Error saving database: {e}")
+
+def load_from_disk():
+    """تحميل البيانات المحفوظة سابقاً إن وجدت"""
+    global teachers_db, admin_replies, admin_credentials
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                teachers_db = data.get('teachers_db', {})
+                admin_replies = data.get('admin_replies', [])
+                admin_credentials = data.get('admin_credentials', {'username': 'admin', 'password': '123456'})
+                return True
+        except Exception as e:
+            print(f"Error loading database file: {e}")
+    return False
+
 def load_initial_teachers():
+    """تحميل البيانات الأولية من الإكسل وإدماجها مع الحفظ الدائم"""
     global teachers_db
+    if load_from_disk():
+        return
+
     try:
         if os.path.exists('بطاقات الاساتذة.xlsx'):
             df = pd.read_excel('بطاقات الاساتذة.xlsx', sheet_name=0)
@@ -53,6 +88,7 @@ def load_initial_teachers():
                     'notifications': [],
                     'monthly_data': {}
                 }
+            save_to_disk()
     except Exception as e:
         print(f"Error loading excel: {e}")
 
@@ -131,12 +167,14 @@ def download_template():
 def delete_reply(reply_id):
     if session.get('role') == 'admin' and 0 <= reply_id < len(admin_replies):
         admin_replies.pop(reply_id)
+        save_to_disk()
     return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/delete_teacher/<username>', methods=['POST'])
 def delete_teacher(username):
     if session.get('role') == 'admin' and username in teachers_db:
         del teachers_db[username]
+        save_to_disk()
     return redirect(url_for('admin_dashboard'))
 
 PWA_HEAD = f'''
@@ -221,6 +259,7 @@ def admin_dashboard():
             new_pass = request.form.get('new_password').strip()
             if new_pass:
                 admin_credentials['password'] = new_pass
+                save_to_disk()
                 msg = "تم تغيير كلمة مرور الإدارة بنجاح!"
             else:
                 msg = "يرجى إدخال كلمة مرور صحيحة."
@@ -251,6 +290,7 @@ def admin_dashboard():
                                     'days': days
                                 }
                                 updated_count += 1
+                    save_to_disk()
                     msg = f"تم استيراد بيانات شهر ({month_name}) بنجاح لعدد ({updated_count}) أستاذ!"
                 except Exception as e:
                     msg = f"حدث خطأ أثناء قراءة الملف: {e}"
@@ -264,9 +304,11 @@ def admin_dashboard():
                 for u, t_data in teachers_db.items():
                     t_data['notifications'].append(f"📢 تعميم إداري: {notif}")
                     count += 1
+                save_to_disk()
                 msg = f"تم إرسال التعميم بنجاح لجميع الأساتذة (عدد {count})!"
             elif target_user in teachers_db and notif:
                 teachers_db[target_user]['notifications'].append(notif)
+                save_to_disk()
                 msg = f"تم إرسال الإشعار والتنبيه للأستاذ {teachers_db[target_user]['name']} بنجاح!"
 
         elif action == 'upload_pdf':
@@ -276,6 +318,7 @@ def admin_dashboard():
                 filename = secure_filename(f"schedule_{target_user}.pdf")
                 file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
                 teachers_db[target_user]['schedule_pdf'] = filename
+                save_to_disk()
                 msg = f"تم رفع جدول التدريس PDF بنجاح للأستاذ {teachers_db[target_user]['name']}."
 
     replies_html = ""
@@ -480,7 +523,6 @@ def admin_dashboard():
 
             const teachersOnly = allTeachers.filter(t => t.username !== 'all');
 
-            // بحث التنبيهات
             function onNotifSearch() {{
                 let query = document.getElementById('notifSearchBox').value.trim().toLowerCase();
                 let listDiv = document.getElementById('notifSuggestions');
@@ -516,7 +558,6 @@ def admin_dashboard():
                 listDiv.style.display = 'block';
             }}
 
-            // بحث جدول الـ PDF
             function onPdfSearch() {{
                 let query = document.getElementById('pdfSearchBox').value.trim().toLowerCase();
                 let listDiv = document.getElementById('pdfSuggestions');
@@ -587,6 +628,7 @@ def teacher_dashboard():
                 'report': report_filename,
                 'date': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')
             })
+            save_to_disk()
             msg = "تم إرسال إجابتك/رسالتك لمدير المعهد بنجاح!"
 
     notifs_list = user_data.get('notifications', [])
