@@ -72,7 +72,7 @@ def save_to_disk():
         print(f"Error saving database: {e}")
 
 def load_from_disk():
-    """تحميل البيانات المحفوظة إن وجدت"""
+    """تحميل البيانات المحفوظة إن وجدت بشكل دائم وشامل"""
     global teachers_db, admin_replies, admin_credentials, academic_years_db, current_academic_year, students_db, field_sessions
     if os.path.exists(DB_FILE):
         try:
@@ -90,12 +90,19 @@ def load_from_disk():
             print(f"Error loading database file: {e}")
     return False
 
-def load_initial_teachers():
-    """تحميل البيانات الأولية للأساتذة من الإكسل"""
+def initialize_system():
+    """تهيئة النظام وتحميل البيانات من الملف أو الإكسل الأولي"""
     global teachers_db
     if load_from_disk():
+        # إذا تم تحميل البيانات من ملف الـ json ولكن جدول الأساتذة فارغ (لسبب ما)، نحاول تحميله من الإكسل
+        if not teachers_db:
+            load_initial_teachers_from_excel()
         return
 
+    load_initial_teachers_from_excel()
+
+def load_initial_teachers_from_excel():
+    global teachers_db
     try:
         if os.path.exists('بطاقات الاساتذة.xlsx'):
             df = pd.read_excel('بطاقات الاساتذة.xlsx', sheet_name=0)
@@ -133,7 +140,7 @@ def load_initial_teachers():
     except Exception as e:
         print(f"Error loading excel: {e}")
 
-load_initial_teachers()
+initialize_system()
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -328,7 +335,7 @@ def create_field_session():
     }
     field_sessions.append(new_s)
     save_to_disk()
-    session['msg'] = "تم إنشاء وتكليف جلسة التدريب الميداني بنجاح!"
+    session['msg'] = "تم إنشاء وتكليف جلسة التدريب الميداني بنجاح وحفظها في قاعدة البيانات الدائمة!"
     return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/download_template')
@@ -1063,7 +1070,7 @@ def submit_field_attendance():
         session_item['submitted_by'] = sender_name
         session_item['status'] = "مكتملة"
         save_to_disk()
-        return jsonify({"success": True, "message": "تم التحقق الجغرافي بالـ GPS بنجاح وحفظ حضور الطلاب وإرساله لمدير المعهد!"})
+        return jsonify({"success": True, "message": "تم التحقق الجغرافي بالـ GPS بنجاح وحفظ حضور الطلاب وإرساله لمدير المعهد ودونت البيانات في database.json!"})
     
     return jsonify({"success": False, "message": "الجلسة غير متوفرة"}), 400
 
