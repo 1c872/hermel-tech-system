@@ -40,7 +40,7 @@ supervisors_db = {
         "floor": "الطابق الأول",
         "classes": ["BP1 الكترونيك", "BP2 معلوماتية"]
     }
-}       # حسابات النظار مع الطابق والصفوف التابعة
+}
 general_supervisors = {'general_admin': {'name': 'الناظر العام', 'password': '123'}}
 grades_db = {}
 attendance_db = {}
@@ -56,34 +56,8 @@ admin_replies = []
 admin_credentials = {'username': 'admin', 'password': '123456'}
 current_academic_year = "2026-2027"
 field_sessions = []
-
 teacher_absences_log = []   
 student_exit_permissions = [] 
-
-TRAINING_LOCATIONS = {
-    "مستشفى الهرمل الحكومي": {"lat": 34.381283, "lng": 36.424456, "radius_meters": 300},
-    "مستشفى البتول": {"lat": 34.381283, "lng": 36.424456, "radius_meters": 300},
-    "مستشفى دار الكرامة": {"lat": 34.403492, "lng": 36.396789, "radius_meters": 250},
-    "مستشفى العاصي": {"lat": 34.398330, "lng": 36.406490, "radius_meters": 250},
-    "مدرسة سانرايز": {"lat": 34.403492, "lng": 36.396789, "radius_meters": 200},
-    "ثانوية الرشاد": {"lat": 34.403826, "lng": 36.391736, "radius_meters": 200},
-    "مدرسة الإمام علي": {"lat": 34.395518, "lng": 36.386411, "radius_meters": 200}
-}
-
-def calculate_distance(lat1, lon1, lat2, lon2):
-    R = 6371000
-    phi1 = math.radians(lat1)
-    phi2 = math.radians(lat2)
-    delta_phi = math.radians(lat2 - lat1)
-    delta_lambda = math.radians(lon2 - lon1)
-    a = math.sin(delta_phi / 2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2)**2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return R * c
-
-def is_within_allowed_time():
-    """التحقق من أن الوقت الحالي بين 07:50 ص و 01:30 ظ (للتدريب الميداني الخارجي)"""
-    now = datetime.now().time()
-    return time(7, 50) <= now <= time(13, 30)
 
 def save_to_disk():
     try:
@@ -140,25 +114,17 @@ ICON_URL = "https://cdn-icons-png.flaticon.com/512/3135/3135755.png"
 def login():
     error = ''
     if request.method == 'POST':
-        username = request.form.get('username').strip().lower()
-        password = request.form.get('password').strip()
+        username = request.form.get('username', '').strip().lower()
+        password = request.form.get('password', '').strip()
         
         if username == admin_credentials['username'] and password == admin_credentials['password']:
             session['username'] = 'admin'
             session['role'] = 'admin'
-            return redirect(url_for('admin_dashboard'))
-        elif username in teachers_db and teachers_db[username]['password'] == password:
-            session['username'] = username
-            session['role'] = 'teacher'
-            return redirect(url_for('teacher_dashboard'))
+            return redirect(url_for('supervisor_dashboard'))
         elif username in supervisors_db and supervisors_db[username]['password'] == password:
             session['username'] = username
             session['role'] = 'supervisor'
             return redirect(url_for('supervisor_dashboard'))
-        elif username in general_supervisors and general_supervisors[username]['password'] == password:
-            session['username'] = username
-            session['role'] = 'general_supervisor'
-            return redirect(url_for('general_supervisor_dashboard'))
         else:
             error = 'اسم المستخدم أو كلمة المرور غير صحيحة'
             
@@ -179,32 +145,36 @@ def login():
     </head>
     <body>
         <div class="card">
-            <img src="{{ICON_URL}}" width="65" style="margin-bottom:5px;">
+            <img src="{{ icon_url }}" width="65" style="margin-bottom:5px;">
             <h2>معهد الهرمل الفني</h2>
             <form method="POST">
                 <input type="text" name="username" placeholder="اسم المستخدم" required>
                 <input type="password" name="password" placeholder="كلمة المرور" required>
                 <button type="submit">دخول النظام</button>
             </form>
-            <div style="color:#d32f2f; margin-top:12px; font-weight:bold; font-size:13px;">{{error}}</div>
+            <div style="color:#d32f2f; margin-top:12px; font-weight:bold; font-size:13px;">{{ error }}</div>
         </div>
         <div style="margin-top: 25px; color: #5c6bc0; font-size: 12px;">🛠️ تم تصميم وتطوير البرنامج من قبل الأستاذ محمد حسين شمص</div>
     </body>
     </html>
-    ''', ICON_URL=ICON_URL, error=error)
+    ''', icon_url=ICON_URL, error=error)
 
 @app.route('/api/get_students/<class_name>')
 def get_students(class_name):
     students = classes_students.get(class_name, ["طالب 1", "طالب 2", "طالب 3"])
     return jsonify({'students': students})
 
-# لوحة الناظر (حسب الطابق والصفوف الموكلة)
 @app.route('/supervisor', methods=['GET', 'POST'])
 def supervisor_dashboard():
-    if session.get('role') != 'supervisor': return redirect(url_for('login'))
+    if session.get('role') not in ['supervisor', 'admin']: 
+        return redirect(url_for('login'))
     
     username = session.get('username')
-    sup_data = supervisors_db.get(username, {})
+    if username == 'admin':
+        sup_data = {"name": "مدير النظام", "floor": "الإدارة العامة", "classes": list(classes_students.keys())}
+    else:
+        sup_data = supervisors_db.get(username, {"name": "ناظر", "floor": "الطابق الأول", "classes": []})
+        
     assigned_classes = sup_data.get('classes', [])
     floor_name = sup_data.get('floor', 'الطابق الأول')
     msg = ''
@@ -279,26 +249,28 @@ def supervisor_dashboard():
     <body>
         <div style="background:#0d47a1; color:white; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; border-radius:8px;">
             <div>
-                <h3 style="margin:0;">صفحة الناظر: {{sup_name}}</h3>
-                <small style="color:#bbdefb;">المسؤول عن: {{floor_name}} | الصفوف: {{assigned_classes_str}}</small>
+                <h3 style="margin:0;">صفحة الناظر: {{ sup_name }}</h3>
+                <small style="color:#bbdefb;">المسؤول عن: {{ floor_name }} | الصفوف المتاحة</small>
             </div>
             <a href="/logout" style="color:white; background:#c62828; padding:6px 12px; border-radius:4px; text-decoration:none;">خروج</a>
         </div>
 
-        {% if msg %}<div style="background:#e8f5e9; color:#2e7d32; padding:10px; border-radius:6px; margin-top:15px; font-weight:bold;">{{msg}}</div>{% endif %}
+        {% if msg %}
+        <div style="background:#e8f5e9; color:#2e7d32; padding:10px; border-radius:6px; margin-top:15px; font-weight:bold;">{{ msg }}</div>
+        {% endif %}
 
         <div class="card">
-            <h3 style="color:#0d47a1; margin-top:0;">📋 رصد الحصص وتغيب/تهرب الأساتذة ({{floor_name}})</h3>
+            <h3 style="color:#0d47a1; margin-top:0;">📋 رصد الحصص وتغيب/تهرب الأساتذة ({{ floor_name }})</h3>
             <form method="POST">
                 <input type="hidden" name="action" value="submit_supervisor_attendance">
                 
                 <label><b>1. اختر الحصة الدراسية:</b></label>
-                <select name="period_num" required>{{period_opts|safe}}</select>
+                <select name="period_num" required>{{ period_opts | safe }}</select>
 
                 <label style="margin-top:10px; display:block;"><b>2. اختر الصف:</b></label>
                 <select name="class_name" id="supClassSelect" onchange="loadSupStudents()" required>
                     <option value="">-- اختر الصف --</option>
-                    {{class_opts|safe}}
+                    {{ class_opts | safe }}
                 </select>
 
                 <div id="supStudentsContainer" style="margin-top:15px;"></div>
@@ -323,9 +295,9 @@ def supervisor_dashboard():
                 <input type="text" name="student_name" placeholder="اسم الطالب الثلاثي" required>
                 <select name="class_name" required>
                     <option value="">-- اختر صف الطالب --</option>
-                    {{class_opts|safe}}
+                    {{ class_opts | safe }}
                 </select>
-                <select name="period_num" required>{{period_opts|safe}}</select>
+                <select name="period_num" required>{{ period_opts | safe }}</select>
                 <input type="time" name="exit_time" required>
                 <button type="submit" style="background:#1565c0;">تسجيل إذن خروج الطالب</button>
             </form>
@@ -358,7 +330,7 @@ def supervisor_dashboard():
         </script>
     </body>
     </html>
-    ''', sup_name=sup_data.get('name'), floor_name=floor_name, assigned_classes_str=", ".join(assigned_classes), class_opts=class_opts, period_opts=period_opts, msg=msg)
+    ''', sup_name=sup_data.get('name'), floor_name=floor_name, class_opts=class_opts, period_opts=period_opts, msg=msg)
 
 @app.route('/logout')
 def logout():
