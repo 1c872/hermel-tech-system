@@ -44,7 +44,6 @@ students_db = []
 field_sessions = []
 teacher_absences_log = []
 
-# إضافة: مخزن بيانات ملفات المديرية الأربعة
 directorate_excel_tables = {
     "students_registered": {"title": "الطلاب المسجلون", "columns": [], "data": []},
     "teachers_cards": {"title": "بطاقات الاساتذة", "columns": [], "data": []},
@@ -304,7 +303,11 @@ def admin_dashboard():
             if file and allowed_file(file.filename) and file_key in directorate_excel_tables:
                 try:
                     df = pd.read_excel(file)
-                    columns = [str(col).strip() for col in df.columns.tolist()]
+                    
+                    # تنظيف أسماء الأعمدة وحذف المسافات الزائدة
+                    df.columns = [str(col).strip() for col in df.columns]
+                    columns = df.columns.tolist()
+                    
                     rows_data = []
                     for _, row in df.iterrows():
                         row_dict = {}
@@ -327,12 +330,15 @@ def admin_dashboard():
                         "data": rows_data
                     }
                     
+                    # استخراج الطلاب والصفوف بدقة وسلاسة
                     if file_key == 'students_registered':
                         new_classes = {}
                         for r in rows_data:
                             c_name = r.get('الصف', r.get('Class', r.get('التخصص', 'غير مصنف')))
-                            s_name = r.get('اسم الطالب', r.get('Student', r.get('الاسم', r.get('الاسم الثلاثي', ''))))
-                            if c_name and s_name:
+                            # دعم جميع صيغ اسم الطالب مع معالجة المسافات
+                            s_name = r.get('اسم الطالب الكامل', r.get('اسم الطالب', r.get('الاسم الثلاثي', r.get('الاسم', ''))))
+                            
+                            if c_name and s_name and str(c_name) != 'nan' and str(s_name) != 'nan':
                                 if c_name not in new_classes:
                                     new_classes[c_name] = []
                                 if s_name not in new_classes[c_name]:
@@ -341,7 +347,7 @@ def admin_dashboard():
                             classes_students.update(new_classes)
 
                     save_to_disk()
-                    msg = f"تم رفع وتحديث ملف ({table_title}) واستخراج بيانات المديرية بنجاح!"
+                    msg = f"تم رفع وتحديث ملف ({table_title}) وقراءة الداتا بنجاح بدون أخطاء!"
                 except Exception as e:
                     msg = f"خطأ في قراءة ملف الإكسل: {e}"
             else:
