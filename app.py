@@ -1,7 +1,9 @@
 import os
 import json
 import io
+import math
 import pandas as pd
+from datetime import datetime
 from flask import Flask, render_template_string, request, redirect, url_for, session, send_from_directory, send_file, jsonify
 from werkzeug.utils import secure_filename
 
@@ -29,6 +31,35 @@ classes_students = {
 admin_replies = []
 admin_credentials = {'username': 'admin', 'password': '123456'}
 
+# 1. نظام الأعوام الدراسية وقواعد بيانات التدريب الميداني والـ GPS
+academic_years_db = ["2025-2026", "2026-2027", "2027-2028", "2028-2029"]
+current_academic_year = "2026-2027"
+
+students_db = []
+field_sessions = []
+
+TRAINING_LOCATIONS = {
+    "مستشفى الهرمل الحكومي": {"lat": 34.381283, "lng": 36.424456, "radius_meters": 300},
+    "مستشفى البتول": {"lat": 34.381283, "lng": 36.424456, "radius_meters": 300},
+    "مستشفى دار الكرامة": {"lat": 34.403492, "lng": 36.396789, "radius_meters": 250},
+    "مستشفى العاصي": {"lat": 34.398330, "lng": 36.406490, "radius_meters": 250},
+    "مدرسة سانرايز": {"lat": 34.403492, "lng": 36.396789, "radius_meters": 200},
+    "ثانوية الرشاد": {"lat": 34.403826, "lng": 36.391736, "radius_meters": 200},
+    "مدرسة الإمام علي": {"lat": 34.395518, "lng": 36.386411, "radius_meters": 200}
+}
+
+def calculate_distance(lat1, lon1, lat2, lon2):
+    """حساب المسافة بالمتر بين نقطتين جغرافيتين باستخدام معادلة Haversine"""
+    R = 6371000
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+
+    a = math.sin(delta_phi / 2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
+
 def save_to_disk():
     try:
         data = {
@@ -38,7 +69,11 @@ def save_to_disk():
             'teacher_classes_map': teacher_classes_map,
             'admin_replies': admin_replies,
             'admin_credentials': admin_credentials,
-            'classes_students': classes_students
+            'classes_students': classes_students,
+            'academic_years_db': academic_years_db,
+            'current_academic_year': current_academic_year,
+            'students_db': students_db,
+            'field_sessions': field_sessions
         }
         with open(DB_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -47,6 +82,7 @@ def save_to_disk():
 
 def load_from_disk():
     global teachers_db, grades_db, attendance_db, teacher_classes_map, admin_replies, admin_credentials, classes_students
+    global academic_years_db, current_academic_year, students_db, field_sessions
     if os.path.exists(DB_FILE):
         try:
             with open(DB_FILE, 'r', encoding='utf-8') as f:
@@ -58,16 +94,24 @@ def load_from_disk():
                 admin_replies = data.get('admin_replies', [])
                 admin_credentials = data.get('admin_credentials', {'username': 'admin', 'password': '123456'})
                 classes_students = data.get('classes_students', classes_students)
+                academic_years_db = data.get('academic_years_db', academic_years_db)
+                current_academic_year = data.get('current_academic_year', current_academic_year)
+                students_db = data.get('students_db', [])
+                field_sessions = data.get('field_sessions', [])
                 return True
         except Exception as e:
             print(f"Error loading database file: {e}")
     return False
 
-def load_initial_teachers():
-    global teachers_db
+def initialize_system():
     if load_from_disk():
+        if not teachers_db:
+            load_initial_teachers_from_excel()
         return
+    load_initial_teachers_from_excel()
 
+def load_initial_teachers_from_excel():
+    global teachers_db
     try:
         if os.path.exists('بطاقات الاساتذة.xlsx'):
             df = pd.read_excel('بطاقات الاساتذة.xlsx', sheet_name=0)
@@ -99,12 +143,20 @@ def load_initial_teachers():
     except Exception as e:
         print(f"Error loading excel: {e}")
 
-load_initial_teachers()
+initialize_system()
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 ICON_URL = "https://cdn-icons-png.flaticon.com/512/3135/3135755.png"
+
+PWA_HEAD = f'''
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#0d47a1">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <link rel="apple-touch-icon" href="{ICON_URL}">
+    <script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');</script>
+'''
 
 @app.route('/manifest.json')
 def manifest():
@@ -127,7 +179,16 @@ def get_students(class_name):
     students = classes_students.get(class_name, ["طالب 1", "طالب 2", "طالب 3", "طالب 4"])
     return jsonify({'students': students})
 
-# مسارات تنزيل نماذج الإكسل الفارغة
+@app.route('/api/check_notifications')
+def check_notifications():
+    if session.get('role') == 'teacher':
+        username = session.get('username')
+        user_data = teachers_db.get(username, {})
+        notifs = user_data.get('notifications', [])
+        return jsonify({'count': len(notifs), 'latest': notifs[-1] if notifs else ''})
+    return jsonify({'count': 0, 'latest': ''})
+
+# مسارات نماذج الإكسل
 @app.route('/download_template/students')
 def download_students_template():
     df = pd.DataFrame(columns=['الاسم الثلاثي', 'الصف'])
@@ -154,14 +215,6 @@ def download_monthly_template():
         df.to_excel(writer, index=False, sheet_name='الحصص_والدوام')
     output.seek(0)
     return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', as_attachment=True, download_name='نموذج_الساعات_والدوام.xlsx')
-
-PWA_HEAD = f'''
-    <link rel="manifest" href="/manifest.json">
-    <meta name="theme-color" content="#0d47a1">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <link rel="apple-touch-icon" href="{ICON_URL}">
-    <script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');</script>
-'''
 
 HEADER_VTE_HTML = '''
 <div style="background:#0d47a1; color:white; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; border-bottom:3px solid #1565c0;">
@@ -198,12 +251,20 @@ HEADER_VTE_HTML = '''
     </div>
 
     <div class="dropdown">
+        <button class="dropbtn">التدريب الميداني والـ GPS ▾</button>
+        <div class="dropdown-content">
+            <a href="javascript:void(0)" onclick="showSection('fieldSessionSec')">🏥 إضافة وإدارة الجلسات الميدانية</a>
+        </div>
+    </div>
+
+    <div class="dropdown">
         <button class="dropbtn">إعدادات وإدارة ▾</button>
         <div class="dropdown-content">
             <a href="javascript:void(0)" onclick="showSection('uploadStudentsSec')">👨‍🎓 رفع ملف الطلاب والصفوف (Excel)</a>
             <a href="javascript:void(0)" onclick="showSection('uploadTeacherClassesSec')">📚 رفع صفوف ومواد الأساتذة (Excel)</a>
             <a href="javascript:void(0)" onclick="showSection('importExcelSec')">📊 استيراد ملفات الحصص (Excel)</a>
             <a href="javascript:void(0)" onclick="showSection('sendNotifSec')">📢 إرسال تعميم / تنبيه</a>
+            <a href="javascript:void(0)" onclick="showSection('teacherRepliesSec')">📩 الرسائل والأعذار الواردة</a>
             <a href="javascript:void(0)" onclick="showSection('changePassSec')">🔑 تغيير كلمة السر</a>
         </div>
     </div>
@@ -273,12 +334,44 @@ def login():
     </html>
     '''
 
+@app.route('/admin/create_field_session', methods=['POST'])
+def create_field_session():
+    if session.get('role') != 'admin': return redirect(url_for('login'))
+    
+    p_teacher = request.form.get('primary_teacher')
+    s_teacher = request.form.get('secondary_teacher')
+    
+    new_s = {
+        "id": len(field_sessions) + 1,
+        "academic_year": current_academic_year,
+        "class_name": request.form.get('class_name'),
+        "major": request.form.get('major'),
+        "location": request.form.get('location'),
+        "primary_teacher": p_teacher if p_teacher else "غير محدد",
+        "secondary_teacher": s_teacher if s_teacher and s_teacher != 'none' else None,
+        "attendance": {},
+        "submitted_by": None,
+        "status": "قيد التدريب",
+        "created_at": datetime.now().strftime('%Y-%m-%d %H:%M')
+    }
+    field_sessions.append(new_s)
+    save_to_disk()
+    session['msg'] = "تم إنشاء وتكليف جلسة التدريب الميداني بنجاح!"
+    return redirect(url_for('admin_dashboard'))
+
+@app.route('/admin/delete_reply/<int:reply_id>', methods=['POST'])
+def delete_reply(reply_id):
+    if session.get('role') == 'admin' and 0 <= reply_id < len(admin_replies):
+        admin_replies.pop(reply_id)
+        save_to_disk()
+    return redirect(url_for('admin_dashboard'))
+
 @app.route('/admin', methods=['GET', 'POST'])
 def admin_dashboard():
     if session.get('role') != 'admin':
         return redirect(url_for('login'))
         
-    msg = ''
+    msg = session.pop('msg', '')
     if request.method == 'POST':
         action = request.form.get('action')
         
@@ -298,11 +391,11 @@ def admin_dashboard():
                     if new_classes:
                         classes_students.update(new_classes)
                         save_to_disk()
-                        msg = "تم استيراد قائمة الطلاب والصفوف من ملف الإكسل بنجاح!"
+                        msg = "تم استيراد قائمة الطلاب والصفوف بنجاح!"
                     else:
-                        msg = "يرجى التأكد من أن الملف يحتوي على أعمدة (الاسم الثلاثي) و (الصف)."
+                        msg = "يرجى التأكد من احتواء الملف على أعمدة (الاسم الثلاثي) و (الصف)."
                 except Exception as e:
-                    msg = f"خطأ في قراءة ملف الطلاب: {e}"
+                    msg = f"خطأ في قراءة الملف: {e}"
 
         elif action == 'upload_teacher_classes':
             file = request.files.get('teacher_classes_excel')
@@ -326,7 +419,7 @@ def admin_dashboard():
                     save_to_disk()
                     msg = f"تم ربط المواد والصفوف لعدد ({updated_count}) أستاذ بنجاح!"
                 except Exception as e:
-                    msg = f"خطأ في الملف! يجب أن يحتوي على الأعمدة: (الاسم الثلاثي، المادة، الصفوف)."
+                    msg = f"خطأ في الملف! الأعمدة المطلوب: (الاسم الثلاثي، المادة، الصفوف)."
 
         elif action == 'change_admin_password':
             new_pass = request.form.get('new_password').strip()
@@ -359,9 +452,9 @@ def admin_dashboard():
                                 t_data['monthly_data'][month_name] = {'hours': hours, 'days': days}
                                 updated_count += 1
                     save_to_disk()
-                    msg = f"تم استيراد ملف الإكسل لشهر ({month_name}) بنجاح لعدد ({updated_count}) أستاذ!"
+                    msg = f"تم استيراد ملف الإكسل لشهر ({month_name}) بنجاح!"
                 except Exception as e:
-                    msg = f"حدث خطأ أثناء قراءة الملف: {e}"
+                    msg = f"خطأ أثناء قراءة الملف: {e}"
 
         elif action == 'send_notification':
             target_user = request.form.get('target_user')
@@ -400,6 +493,40 @@ def admin_dashboard():
         absent_str = ", ".join(v.get('absent', [])) if v.get('absent') else "حضور كامل (لا يوجد غياب)"
         attendance_rows += f"<tr><td><b>{k}</b></td><td style='color:#c62828; font-weight:bold;'>{absent_str}</td></tr>"
 
+    replies_html = ""
+    for idx, r in enumerate(reversed(admin_replies)):
+        real_idx = len(admin_replies) - 1 - idx
+        report_link = f"<a href='/uploads/{r['report']}' target='_blank'>📎 عرض العذر</a>" if r.get('report') else "لا يوجد مرفق"
+        replies_html += f"""
+        <div style="background:#fff3e0; border-right:4px solid #e65100; padding:12px; margin-bottom:10px; border-radius:6px; display:flex; justify-content:space-between; align-items:center;">
+            <div>
+                <span style="color:#0d47a1; font-weight:bold;">📩 من الأستاذ: {r['teacher_name']}</span> | <small>{r.get('date', '')}</small><br>
+                <b>الرسالة:</b> {r['message']}<br>
+                <small>{report_link}</small>
+            </div>
+            <form method="POST" action="/admin/delete_reply/{real_idx}" style="margin:0;">
+                <button type="submit" style="background:#c62828; color:white; border:none; padding:5px 10px; border-radius:4px; font-size:12px; cursor:pointer;">✖️ مسح</button>
+            </form>
+        </div>
+        """
+    if not replies_html: replies_html = "<p style='color:#666;'>لا توجد إجابات أو أعذار جديدة.</p>"
+
+    field_rows = ""
+    for fs in reversed(field_sessions):
+        sec_t = f" / {fs['secondary_teacher']}" if fs['secondary_teacher'] else ""
+        if fs['status'] == 'مكتملة':
+            absents = [st for st, stt in fs['attendance'].items() if stt == 'غائب']
+            abs_str = ", ".join(absents) if absents else "لا يوجد غياب"
+            att_info = f"<span style='color:#2e7d32; font-weight:bold;'>مكتملة بواسطة ({fs['submitted_by']})</span><br><small style='color:#c62828;'>الغائبون: {abs_str}</small>"
+        else:
+            att_info = "<span style='color:#e65100; font-weight:bold;'>⏳ قيد الانتظار بالـ GPS</span>"
+
+        field_rows += f"<tr><td><b>{fs['location']}</b><br><small>{fs['class_name']} - {fs['major']}</small></td><td><b>{fs['primary_teacher']}</b>{sec_t}</td><td>{att_info}</td></tr>"
+    if not field_rows: field_rows = "<tr><td colspan='3'>لا توجد جلسات تدريب ميداني بعد.</td></tr>"
+
+    teachers_options = "".join([f"<option value='{t['name']}'>{t['name']}</option>" for u, t in teachers_db.items()])
+    locations_options = "".join([f"<option value='{loc}'>{loc}</option>" for loc in TRAINING_LOCATIONS.keys()])
+
     return f'''
     <!DOCTYPE html>
     <html lang="ar" dir="rtl">
@@ -422,7 +549,6 @@ def admin_dashboard():
             .vte-box {{ background: #e3f2fd; padding: 15px; border-radius: 8px; border-right: 4px solid #1565c0; margin-bottom: 15px; font-size: 14px; line-height: 1.6; }}
             .excel-guide {{ background: #fff3e0; padding: 10px; border-radius: 6px; border-right: 4px solid #ff9800; font-size: 13px; margin-bottom: 10px; }}
             .btn-download {{ display: inline-block; background: #2e7d32; color: white; padding: 10px 15px; border-radius: 5px; text-decoration: none; font-weight: bold; font-size: 13.5px; text-align: center; margin-top: 8px; }}
-            .btn-download:hover {{ background: #1b5e20; }}
         </style>
     </head>
     <body>
@@ -432,30 +558,57 @@ def admin_dashboard():
             {f'<div class="msg">{msg}</div>' if msg else ''}
 
             <div class="vte-box">
-                🏛️ <b>بوابة معهد الهرمل الفني:</b> يمكنك تحميل نموذج إكسل فارغ بالأعمدة المطلوبة، تعبئته من ملفات المديرية، ثم رفعه لتحديث البيانات تلقائياً.
+                🏛️ <b>بوابة معهد الهرمل الفني الكاملة:</b> إدارة الحضور والغياب، العلامات، التدريب الميداني للمستشفيات والمدارس عبر الـ GPS، واستيراد ملفات الإكسل الرسمية.
             </div>
 
             <!-- رفع ملف الطلاب -->
             <div id="uploadStudentsSec" class="card active">
-                <h3 style="margin-top:0; color:#0d47a1;">👨‍🎓 رفع ملف إكسل الطلاب والصفوف (2026-2027)</h3>
-                <div class="excel-guide">📌 الأعمدة المطلوبة في الإكسل: <code>الاسم الثلاثي</code> | <code>الصف</code></div>
+                <h3 style="margin-top:0; color:#0d47a1;">👨‍🎓 رفع ملف إكسل الطلاب والصفوف</h3>
+                <div class="excel-guide">📌 الأعمدة المطلوبة: <code>الاسم الثلاثي</code> | <code>الصف</code></div>
                 <a href="/download_template/students" class="btn-download">📥 تحميل نموذج إكسل فارغ (الطلاب)</a>
                 <form method="POST" enctype="multipart/form-data" style="margin-top:10px;">
                     <input type="hidden" name="action" value="upload_students">
                     <input type="file" name="students_excel" accept=".xlsx,.xls" required>
-                    <button type="submit" style="background:#2e7d32;">رفع واستيراد طلاب المعهد</button>
+                    <button type="submit" style="background:#2e7d32;">رفع واستيراد الطلاب</button>
                 </form>
+            </div>
+
+            <!-- الجلسات الميدانية والـ GPS -->
+            <div id="fieldSessionSec" class="card">
+                <h3 style="margin-top:0; color:#0d47a1;">🏥 إضافة وتكليف جلسة تدريب ميداني (مستشفيات / مدارس / الـ GPS)</h3>
+                <form action="/admin/create_field_session" method="POST">
+                    <label>المكان المعتمد للتدريب:</label>
+                    <select name="location" required>{locations_options}</select>
+                    <label>الصف:</label>
+                    <input type="text" name="class_name" placeholder="سنة ثالثة" required>
+                    <label>الاختصاص:</label>
+                    <input type="text" name="major" placeholder="عناية تمريضية" required>
+                    <label>الأستاذ المشرف الرئيسي:</label>
+                    <select name="primary_teacher" required>{teachers_options}</select>
+                    <label>الأستاذ المساعد (اختياري):</label>
+                    <select name="secondary_teacher">
+                        <option value="none">-- أستاذ واحد فقط --</option>
+                        {teachers_options}
+                    </select>
+                    <button type="submit" style="background:#1565c0; margin-top:10px;">تكليف وتثبيت الجلسة</button>
+                </form>
+
+                <h4 style="margin-top:20px; color:#0d47a1;">سجل متابعة التدريب الميداني الجغرافي:</h4>
+                <table>
+                    <tr><th>المكان والصف</th><th>المشرف</th><th>حالة إرسال التقرير والـ GPS</th></tr>
+                    {field_rows}
+                </table>
             </div>
 
             <!-- رفع صفوف ومواد الأساتذة -->
             <div id="uploadTeacherClassesSec" class="card">
-                <h3 style="margin-top:0; color:#0d47a1;">📚 رفع ملف إكسل مواد وصفوف الأساتذة (2026-2027)</h3>
-                <div class="excel-guide">📌 الأعمدة المطلوبة في الإكسل: <code>الاسم الثلاثي</code> | <code>المادة</code> | <code>الصفوف</code></div>
+                <h3 style="margin-top:0; color:#0d47a1;">📚 رفع ملف إكسل مواد وصفوف الأساتذة</h3>
+                <div class="excel-guide">📌 الأعمدة المطلوبة: <code>الاسم الثلاثي</code> | <code>المادة</code> | <code>الصفوف</code></div>
                 <a href="/download_template/teachers" class="btn-download">📥 تحميل نموذج إكسل فارغ (مواد الأساتذة)</a>
                 <form method="POST" enctype="multipart/form-data" style="margin-top:10px;">
                     <input type="hidden" name="action" value="upload_teacher_classes">
                     <input type="file" name="teacher_classes_excel" accept=".xlsx,.xls" required>
-                    <button type="submit" style="background:#2e7d32;">رفع وتأكيد توزيع الصفوف</button>
+                    <button type="submit" style="background:#2e7d32;">رفع وتأكيد الصفوف</button>
                 </form>
             </div>
 
@@ -535,6 +688,12 @@ def admin_dashboard():
                 </form>
             </div>
 
+            <!-- رسائل الأعذار من الأساتذة -->
+            <div id="teacherRepliesSec" class="card">
+                <h3 style="margin-top:0; color:#0d47a1;">📩 الأعذار والرسائل الواردة من الأساتذة</h3>
+                {replies_html}
+            </div>
+
             <!-- تغيير كلمة السر -->
             <div id="changePassSec" class="card">
                 <h3 style="margin-top:0; color:#0d47a1;">🔑 تغيير كلمة مرور الإدارة</h3>
@@ -566,6 +725,7 @@ def teacher_dashboard():
         
     username = session.get('username')
     user_data = teachers_db.get(username, {})
+    t_name = user_data.get('name', '')
     msg = ''
 
     if request.method == 'POST':
@@ -580,10 +740,10 @@ def teacher_dashboard():
             for student in students:
                 grade_val = request.form.get(f"grade_{student}")
                 if grade_val:
-                    grades_db[f"{student} - {class_name} ({subject}) [2026-2027]"] = grade_val
+                    grades_db[f"{student} - {class_name} ({subject}) [{current_academic_year}]"] = grade_val
                     saved_count += 1
             save_to_disk()
-            msg = f"تم رصد وحفظ علامات ({saved_count}) طلاب لصف ({class_name}) للعام الحالي (2026-2027) بنجاح!"
+            msg = f"تم حفظ علامات ({saved_count}) طلاب لصف ({class_name}) للعام ({current_academic_year}) بنجاح!"
 
         elif action == 'submit_class_attendance':
             class_name = request.form.get('class_name')
@@ -593,12 +753,29 @@ def teacher_dashboard():
             absent_students = [s for s in students if s not in present_students]
             date_key = pd.Timestamp.now().strftime('%Y-%m-%d')
             
-            attendance_db[f"صف: {class_name} ({date_key}) [2026-2027]"] = {
+            attendance_db[f"صف: {class_name} ({date_key}) [{current_academic_year}]"] = {
                 'present': present_students,
                 'absent': absent_students
             }
             save_to_disk()
-            msg = f"تم توثيق الحضور والغياب لصف ({class_name}) للعام الحالي (2026-2027): عدد المتغيبين ({len(absent_students)}) طالب!"
+            msg = f"تم توثيق الحضور والغياب لصف ({class_name}): المتغيبون ({len(absent_students)}) طالب!"
+
+        elif action == 'send_reply':
+            reply_msg = request.form.get('reply_message')
+            file = request.files.get('medical_report')
+            report_filename = None
+            if file and allowed_file(file.filename):
+                report_filename = secure_filename(f"report_{username}_{file.filename}")
+                file.save(os.path.join(app.config['UPLOAD_FOLDER'], report_filename))
+            
+            admin_replies.append({
+                'teacher_name': t_name,
+                'message': reply_msg,
+                'report': report_filename,
+                'date': datetime.now().strftime('%Y-%m-%d %H:%M')
+            })
+            save_to_disk()
+            msg = "تم إرسال رسالتك/عذرك الطبي لمدير المعهد بنجاح!"
 
     notifs_list = user_data.get('notifications', [])
     notifs_html = "".join([f"<div style='background:#e3f2fd; border-right:4px solid #1565c0; padding:10px; margin-bottom:6px; font-weight:bold; color:#0d47a1;'>🔔 {n}</div>" for n in notifs_list])
@@ -612,6 +789,27 @@ def teacher_dashboard():
 
     my_classes = teacher_classes_map.get(username, list(classes_students.keys()))
     class_options = "".join([f'<option value="{c}">{c}</option>' for c in my_classes])
+
+    # جلسات التدريب الميداني GPS
+    my_field_sessions = [s for s in field_sessions if (s['primary_teacher'] == t_name or s['secondary_teacher'] == t_name)]
+    field_sessions_html = ""
+    for s in my_field_sessions:
+        if s['status'] == 'قيد التدريب':
+            field_sessions_html += f'''
+            <div style="background:#f9fbe7; border:1.5px solid #c0ca33; padding:15px; border-radius:8px; margin-top:10px;">
+                <h4 style="margin:0 0 10px 0; color:#827717;">📍 موقع التدريب الميداني: {s['location']}</h4>
+                <p style="font-size:13.5px; margin:4px 0;"><b>الصف:</b> {s['class_name']} | <b>الاختصاص:</b> {s['major']}</p>
+                <button type="button" onclick="submitGpsAttendance({s['id']}, '{t_name}', '{s['location']}')" style="background:#2e7d32; color:white; border:none; padding:10px; width:100%; border-radius:5px; font-weight:bold; cursor:pointer; margin-top:8px;">
+                    📍 تأكيد حضورك وتوثيق موقعك بـ الـ GPS
+                </button>
+            </div>
+            '''
+        else:
+            field_sessions_html += f'''
+            <div style="background:#e8f5e9; border:1.5px solid #2e7d32; padding:12px; border-radius:8px; margin-top:10px;">
+                <b style="color:#2e7d32;">✔ تم توثيق الحضور الجغرافي لـ ({s['location']}) بنجاح!</b>
+            </div>
+            '''
 
     return f'''
     <!DOCTYPE html>
@@ -648,16 +846,8 @@ def teacher_dashboard():
                 {notifs_html if notifs_html else '<p style="color:#666;">لا توجد تعاميم جديدة.</p>'}
             </div>
 
-            <!-- اختيار العام لاستخراج السجلات فقط -->
-            <div class="card no-print" style="border-top: 4px solid #f57c00;">
-                <h4 style="margin-top:0; color:#e65100;">📊 استخراج معلومات وسجلات الأعوام الدراسية:</h4>
-                <p style="font-size:12px; color:#666; margin-bottom:4px;">تنبيه: إدخال البيانات الجديدة يتم حصراً للعام الحالي (2026-2027).</p>
-                <select id="academicYearSelect" style="font-weight:bold; color:#0d47a1;">
-                    <option value="2026-2027">العام الحالي (2026-2027)</option>
-                    <option value="2025-2026">سجلات العام السابق (2025-2026)</option>
-                    <option value="2027-2028">سجلات العام القادم (2027-2028)</option>
-                </select>
-            </div>
+            <!-- التدريب الميداني والـ GPS -->
+            {f'<div class="card no-print"><h4 style="margin-top:0; color:#0d47a1;">🏥 التوثيق الجغرافي الميداني (GPS):</h4>{field_sessions_html}</div>' if field_sessions_html else ''}
 
             <div class="card no-print">
                 <h4 style="margin-top:0; color:#0d47a1;">📊 الساعات المنفذة وأيام الدوام:</h4>
@@ -673,9 +863,9 @@ def teacher_dashboard():
                 {pdf_link}
             </div>
 
-            <!-- توثيق حضور وغياب الطلاب -->
+            <!-- توثيق حضور وغياب الطلاب الداخلي -->
             <div class="card no-print">
-                <h4 style="margin-top:0; color:#0d47a1;">📋 توثيق حضور وغياب الطلاب (للعام الحالي 2026-2027):</h4>
+                <h4 style="margin-top:0; color:#0d47a1;">📋 توثيق حضور وغياب الطلاب اليومي:</h4>
                 <form method="POST">
                     <input type="hidden" name="action" value="submit_class_attendance">
                     <label style="font-size:13px; font-weight:bold;">1. اختر الصف والشعبة:</label>
@@ -691,7 +881,7 @@ def teacher_dashboard():
 
             <!-- إدخال العلامات واستخراج التقرير -->
             <div class="card">
-                <h4 style="margin-top:0; color:#0d47a1;" class="no-print">📝 إدخال علامات الطلاب ورصدها (مادة: {user_data.get('subject')} - عام 2026-2027):</h4>
+                <h4 style="margin-top:0; color:#0d47a1;" class="no-print">📝 إدخال علامات الطلاب ورصدها (مادة: {user_data.get('subject')}):</h4>
                 <form method="POST">
                     <input type="hidden" name="action" value="submit_class_grades">
                     <label style="font-size:13px; font-weight:bold;" class="no-print">1. اختر الصف والشعبة:</label>
@@ -705,6 +895,18 @@ def teacher_dashboard():
                         <button type="submit" id="gradesSubmitBtn" style="display:none; background:#0d47a1; margin-top:15px; flex:2;">حفظ ورصد علامات الصف</button>
                         <button type="button" id="printReportBtn" onclick="window.print()" style="display:none; background:#2e7d32; margin-top:15px; flex:1;">📄 استخراج تقرير علامات الصف (طباعة / PDF)</button>
                     </div>
+                </form>
+            </div>
+
+            <!-- إرسال رسالة أو عذر للإدارة -->
+            <div class="card no-print">
+                <h4 style="margin-top:0; color:#0d47a1;">💬 إرسال عذر طبي / رسالة لإدارة المعهد:</h4>
+                <form method="POST" enctype="multipart/form-data">
+                    <input type="hidden" name="action" value="send_reply">
+                    <textarea name="reply_message" placeholder="اكتب سبب التغيب أو رسالتك..." required style="height:70px;"></textarea>
+                    <label style="font-size:12px; color:#555;">إرفاق تقرير طبي / عذر رسمي (PDF/صورة):</label>
+                    <input type="file" name="medical_report" accept=".pdf,.png,.jpg,.jpeg">
+                    <button type="submit" style="background:#1565c0; margin-top:8px;">إرسال للإدارة</button>
                 </form>
             </div>
         </div>
@@ -757,7 +959,7 @@ def teacher_dashboard():
                 fetch('/api/get_students/' + encodeURIComponent(className))
                     .then(res => res.json())
                     .then(data => {{
-                        let html = '<h3 style="text-align:center; color:#0d47a1;">معهد الهرمل الفني - كشف علامات صف (' + className + ') للعام الدراسي 2026-2027<br><small style="color:#555;">المادة: {user_data.get('subject')}</small></h3>';
+                        let html = '<h3 style="text-align:center; color:#0d47a1;">معهد الهرمل الفني - كشف علامات صف (' + className + ')<br><small style="color:#555;">المادة: {user_data.get('subject')}</small></h3>';
                         html += '<p style="font-size:13px; color:#0d47a1; font-weight:bold;" class="no-print">أدخل علامة كل طالب من 20:</p>';
                         data.students.forEach(student => {{
                             html += `
@@ -771,10 +973,68 @@ def teacher_dashboard():
                         printBtn.style.display = 'block';
                     }});
             }}
+
+            function submitGpsAttendance(sessionId, teacherName, locationName) {{
+                if (!navigator.geolocation) {{
+                    alert("متصفحك لا يدعم خدمة الـ GPS");
+                    return;
+                }}
+
+                navigator.geolocation.getCurrentPosition(function(position) {{
+                    fetch('/teacher/submit_field_attendance', {{
+                        method: 'POST',
+                        headers: {{ 'Content-Type': 'application/json' }},
+                        body: JSON.stringify({{
+                            session_id: sessionId,
+                            sender_name: teacherName,
+                            location: locationName,
+                            attendance: {{}},
+                            lat: position.coords.latitude,
+                            lng: position.coords.longitude
+                        }})
+                    }})
+                    .then(res => res.json())
+                    .then(data => {{
+                        alert(data.message);
+                        if(data.success) location.reload();
+                    }});
+                }}, function(error) {{
+                    alert("يرجى تفعيل الـ GPS على هاتفك لتأكيد تواجدك بالمستشفى/المدرسة.");
+                }}, {{ enableHighAccuracy: true }});
+            }}
         </script>
     </body>
     </html>
     '''
+
+@app.route('/teacher/submit_field_attendance', methods=['POST'])
+def submit_field_attendance():
+    if session.get('role') != 'teacher': return jsonify({"success": False, "message": "غير مصرح"}), 403
+    
+    data = request.json
+    session_id = int(data.get('session_id'))
+    sender_name = data.get('sender_name')
+    location_name = data.get('location')
+    user_lat = float(data.get('lat'))
+    user_lng = float(data.get('lng'))
+
+    if location_name in TRAINING_LOCATIONS:
+        loc_data = TRAINING_LOCATIONS[location_name]
+        distance = calculate_distance(user_lat, user_lng, loc_data['lat'], loc_data['lng'])
+        if distance > loc_data['radius_meters']:
+            return jsonify({
+                "success": False, 
+                "message": f"عذراً! أنت خارج نطاق موقع ({location_name}). المسافة الحالية هي {int(distance)} متر والنطاق المسموح هو {loc_data['radius_meters']} متر."
+            }), 400
+
+    session_item = next((s for s in field_sessions if s['id'] == session_id), None)
+    if session_item:
+        session_item['submitted_by'] = sender_name
+        session_item['status'] = "مكتملة"
+        save_to_disk()
+        return jsonify({"success": True, "message": "تم التحقق الجغرافي عبر الـ GPS بنجاح وتوثيق وجودك بالموقع!"})
+    
+    return jsonify({"success": False, "message": "الجلسة غير متوفرة"}), 400
 
 @app.route('/uploads/<filename>')
 def uploaded_file(filename):
@@ -783,7 +1043,7 @@ def uploaded_file(filename):
 @app.route('/logout')
 def logout():
     session.clear()
-    return redirect(url_for('logout'))
+    return redirect(url_for('login'))
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
