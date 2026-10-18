@@ -43,7 +43,8 @@ students_db = []
 field_sessions = []
 teacher_absences_log = []
 
-# مخزن بيانات المديرية المحدث ليشمل ملف الساعات المنفذة
+MONTH_COLUMNS = ["10", "11", "12", "01", "02", "03", "04", "05", "06", "07", "08"]
+
 directorate_excel_tables = {
     "students_registered": {"title": "الطلاب المسجلون", "columns": [], "data": []},
     "teachers_cards": {"title": "بطاقات الاساتذة", "columns": [], "data": []},
@@ -180,10 +181,10 @@ HEADER_VTE_HTML = '''
     <div class="dropdown">
         <button class="dropbtn">الأساتذة والدوام ▾</button>
         <div class="dropdown-content">
-            <a href="javascript:void(0)" onclick="showSection('teachersListSec')">👨‍🏫 سجل الأساتذة وحسابات الدخول</a>
+            <a href="javascript:void(0)" onclick="showSection('teachersListSec')">👨‍🏫 سجل الأساتذة وعقود الساعات</a>
             <a href="javascript:void(0)" onclick="showSection('viewTeachersCards')">📇 بطاقات الاساتذة والمعلومات الشخصية</a>
             <a href="javascript:void(0)" onclick="showSection('viewWeeklySchedule')">📅 البرنامج الأسبوعي والأساتذة والمواد</a>
-            <a href="javascript:void(0)" onclick="showSection('viewExecutedHours')">⏱️ الساعات المنفذة شهرياً</a>
+            <a href="javascript:void(0)" onclick="showSection('viewExecutedHours')">⏱️ الساعات المنفذة شهرياً (نظام المديرية)</a>
         </div>
     </div>
 
@@ -331,8 +332,9 @@ def admin_dashboard():
             if file and allowed_file(file.filename) and file_key in directorate_excel_tables:
                 try:
                     df = pd.read_excel(file)
-                    df.columns = [str(col).strip() for col in df.columns]
-                    columns = df.columns.tolist()
+                    clean_cols = [str(col).strip().replace("'", "").replace('"', '') for col in df.columns]
+                    df.columns = clean_cols
+                    columns = clean_cols
                     
                     rows_data = []
                     for _, row in df.iterrows():
@@ -354,24 +356,36 @@ def admin_dashboard():
                     
                     if file_key == 'executed_hours':
                         monthly_map = {}
+                        contract_map = {}
+                        
                         for r in rows_data:
                             t_name = r.get('الاسم الثلاثي', r.get('اسم الاستاذ', '')).strip()
                             if t_name:
                                 if t_name not in monthly_map:
                                     monthly_map[t_name] = {}
-                                for col in columns:
-                                    if col not in ['الاسم الثلاثي', 'اسم المعهد', 'رقم المعهد', 'الرقم المالي', '(10)لم يقبض omt']:
+                                
+                                try:
+                                    c_hrs = float(r.get('Maxhoures', 300) or 300)
+                                    contract_map[t_name] = int(c_hrs)
+                                except:
+                                    contract_map[t_name] = 300
+                                
+                                for m_col in MONTH_COLUMNS:
+                                    if m_col in r:
                                         try:
-                                            hrs = float(r.get(col, 0) or 0)
-                                            monthly_map[t_name][col] = hrs
+                                            val_num = float(r.get(m_col, 0) or 0)
+                                            monthly_map[t_name][m_col] = val_num
                                         except:
-                                            pass
+                                            monthly_map[t_name][m_col] = 0.0
+                        
                         directorate_excel_tables['executed_hours']['monthly_hours'] = monthly_map
                         
                         for u, t_info in teachers_db.items():
                             t_real_name = t_info['name'].strip()
                             if t_real_name in monthly_map:
                                 t_info['monthly_hours'] = monthly_map[t_real_name]
+                            if t_real_name in contract_map:
+                                t_info['contract_hours'] = contract_map[t_real_name]
 
                     directorate_excel_tables[file_key] = {
                         "title": table_title,
@@ -398,7 +412,7 @@ def admin_dashboard():
                             classes_students.update(new_classes)
 
                     save_to_disk()
-                    msg = f"تم رفع وتحديث ملف ({table_title}) وقراءة الساعات والداتا بنجاح!"
+                    msg = f"تم رفع وتحديث ملف ({table_title}) بقراءة مجدولة على طريقة المديرية بنجاح!"
                 except Exception as e:
                     msg = f"خطأ في قراءة ملف الإكسل: {e}"
             else:
@@ -454,17 +468,52 @@ def admin_dashboard():
     attendance_rows = "".join([f"<tr><td><b>{k}</b></td><td style='color:#c62828;'>متغيبون: {v.get('absent', [])}</td></tr>" for k, v in attendance_db.items()])
     grades_rows = "".join([f"<tr><td><b>{k}</b></td><td><b style='color:#0d47a1;'>{v} / 20</b></td></tr>" for k, v in grades_db.items()])
     
+    executed_hours_table_html = ""
+    monthly_data_map = directorate_excel_tables.get('executed_hours', {}).get('monthly_hours', {})
+    
+    if monthly_data_map:
+        m_headers = "".join([f"<th>ش {m}</th>" for m in MONTH_COLUMNS])
+        m_rows = ""
+        for t_name, m_dict in monthly_data_map.items():
+            m_tds = "".join([f"<td>{m_dict.get(m, 0):.0f}</td>" for m in MONTH_COLUMNS])
+            total_exec = sum(m_dict.values())
+            m_rows += f"<tr><td style='text-align:right; font-weight:bold;'>{t_name}</td>{m_tds}<td style='background:#e3f2fd;'><b style='color:#0d47a1;'>{total_exec:.0f}</b></td></tr>"
+        
+        executed_hours_table_html = f"""
+        <div style="overflow-x:auto;">
+            <table>
+                <tr>
+                    <th style="min-width:180px;">الاسم الثلاثي</th>
+                    {m_headers}
+                    <th>المجموع المنفذ</th>
+                </tr>
+                {m_rows}
+            </table>
+        </div>
+        """
+    else:
+        executed_hours_table_html = "<p style='color:#666;'>لم يتم رفع ملف الساعات المنفذة بعد.</p>"
+
     teachers_rows = ""
     for u, t in teachers_db.items():
         dev_stat = "<span style='color:#2e7d32; font-weight:bold;'>مرتبط برقم هاتف</span>" if t.get('device_id') else "<span style='color:#e65100;'>في انتظار تسجيل الهاتف</span>"
-        total_hrs = sum(t.get('monthly_hours', {}).values())
+        
+        monthly_h = t.get('monthly_hours', {})
+        executed_hrs = sum([float(v) for v in monthly_h.values()]) if monthly_h else 0
+        contract_hrs = float(t.get('contract_hours', 300))
+        remaining_hrs = contract_hrs - executed_hrs
+        
+        rem_color = "#2e7d32" if remaining_hrs >= 0 else "#c62828"
+        
         teachers_rows += f"""
         <tr>
             <td><b>{t['name']}</b></td>
             <td><code style='color:#0d47a1;'>{u}</code></td>
             <td><code>{t['password']}</code></td>
             <td>{dev_stat}</td>
-            <td><b style='color:#2e7d32;'>{total_hrs} ساعة</b></td>
+            <td><b>{int(contract_hrs)} ساعة</b></td>
+            <td><b style='color:#0d47a1;'>{executed_hrs:.0f} ساعة</b></td>
+            <td><b style='color:{rem_color};'>{remaining_hrs:.0f} ساعة</b></td>
         </tr>
         """
     
@@ -570,18 +619,26 @@ def admin_dashboard():
             </div>
 
             <div id="viewExecutedHours" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">⏱️ الساعات المنفذة شهرياً</h3>
-                {{ directorate_htmls['executed_hours'] | safe }}
+                <h3 style="color:#0d47a1; margin-top:0;">⏱️ الساعات المنفذة شهرياً (عرض جدول المديرية التفصيلي)</h3>
+                {{ executed_hours_table_html | safe }}
             </div>
 
             <div id="teachersListSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">👨‍🏫 سجل الأساتذة وحسابات الدخول والبصمة</h3>
+                <h3 style="color:#0d47a1; margin-top:0;">👨‍🏫 سجل الأساتذة وحسابات الدخول وساعات العقود</h3>
                 <form method="POST" style="margin-bottom:15px;">
                     <input type="hidden" name="action" value="create_auto_accounts">
                     <button type="submit" style="background:#2e7d32;">⚡ توليد يوزر وباسورد افتراضي لجميع الأساتذة تلقائياً</button>
                 </form>
                 <table>
-                    <tr><th>اسم الأستاذ</th><th>اسم المستخدم</th><th>كلمة المرور</th><th>حالة الهاتف</th><th>مجموع الساعات المنفذة</th></tr>
+                    <tr>
+                        <th>اسم الأستاذ</th>
+                        <th>اسم المستخدم</th>
+                        <th>كلمة المرور</th>
+                        <th>حالة الهاتف</th>
+                        <th>العقد الإجمالي</th>
+                        <th>المنفذ حتى الآن</th>
+                        <th>المتبقي من العقد</th>
+                    </tr>
                     {{ teachers_rows | safe }}
                 </table>
             </div>
@@ -617,13 +674,13 @@ def admin_dashboard():
                         <option value="teachers_cards">📇 2. بطاقات الاساتذة</option>
                         <option value="personal_info">👤 3. المعلومات الشخصية</option>
                         <option value="weekly_schedule">📅 4. البرنامج الأسبوعي مع الاساتذة والمواد</option>
-                        <option value="executed_hours">⏱️ 5. الساعات المنفذة للاساتذة (جديد)</option>
+                        <option value="executed_hours">⏱️ 5. الساعات المنفذة للاساتذة</option>
                     </select>
 
                     <label style="margin-top:12px; display:block;"><b>اختر ملف الإكسل (.xlsx أو .xls):</b></label>
                     <input type="file" name="excel_file" accept=".xlsx, .xls" required>
                     
-                    <button type="submit" style="margin-top:15px; background:#2e7d32; font-size:15px;">📥 رفع وتحديث الساعات والداتا فوراً</button>
+                    <button type="submit" style="margin-top:15px; background:#2e7d32; font-size:15px;">📥 رفع وتحديث الساعات والعقود فوراً</button>
                 </form>
             </div>
 
@@ -672,7 +729,7 @@ def admin_dashboard():
     </body>
     </html>
     '''
-    return render_template_string(admin_template, attendance_rows=attendance_rows, grades_rows=grades_rows, teachers_rows=teachers_rows, field_rows=field_rows, replies_html=replies_html, teacher_opts=teacher_opts, locations_opts=locations_opts, directorate_htmls=directorate_htmls, msg=msg)
+    return render_template_string(admin_template, attendance_rows=attendance_rows, grades_rows=grades_rows, teachers_rows=teachers_rows, field_rows=field_rows, replies_html=replies_html, teacher_opts=teacher_opts, locations_opts=locations_opts, directorate_htmls=directorate_htmls, executed_hours_table_html=executed_hours_table_html, msg=msg)
 
 @app.route('/teacher', methods=['GET', 'POST'])
 def teacher_dashboard():
@@ -725,18 +782,47 @@ def teacher_dashboard():
     notifs = "".join([f"<div style='background:#e3f2fd; padding:8px; margin-bottom:5px; border-radius:4px; font-weight:bold;'>🔔 {n}</div>" for n in user_data.get('notifications', [])])
 
     monthly_hrs = user_data.get('monthly_hours', {})
+    contract_hrs = float(user_data.get('contract_hours', 300))
+    executed_hrs = sum([float(v) for v in monthly_hrs.values()]) if monthly_hrs else 0
+    remaining_hrs = contract_hrs - executed_hrs
+    
     hrs_html = ""
     if monthly_hrs:
-        hrs_tr = "".join([f"<tr><td>الشهر ({m})</td><td><b>{h} ساعة</b></td></tr>" for m, h in monthly_hrs.items()])
-        total_h = sum(monthly_hrs.values())
+        m_headers = "".join([f"<th>ش {m}</th>" for m in MONTH_COLUMNS])
+        m_tds = "".join([f"<td>{monthly_hrs.get(m, 0):.0f}</td>" for m in MONTH_COLUMNS])
+        
+        hrs_html = f"""
+        <div class="card" style="border-top:4px solid #1565c0; background:#ffffff;">
+            <h4 style="color:#0d47a1; margin-top:0; border-bottom:2px solid #e3f2fd; padding-bottom:8px;">📊 ملخص عقد الساعات والمنفذ شهرياً:</h4>
+            
+            <div style="display:flex; gap:12px; margin-bottom:15px; flex-wrap:wrap;">
+                <div style="flex:1; min-width:140px; background:#e3f2fd; padding:12px; border-radius:8px; text-align:center;">
+                    <small style="color:#0d47a1; font-weight:bold;">ساعات العقد الإجمالية</small>
+                    <div style="font-size:20px; font-weight:bold; color:#0d47a1; margin-top:4px;">{int(contract_hrs)} ساعة</div>
+                </div>
+                <div style="flex:1; min-width:140px; background:#e8f5e9; padding:12px; border-radius:8px; text-align:center;">
+                    <small style="color:#2e7d32; font-weight:bold;">المنفذ حتى الآن</small>
+                    <div style="font-size:20px; font-weight:bold; color:#2e7d32; margin-top:4px;">{executed_hrs:.0f} ساعة</div>
+                </div>
+                <div style="flex:1; min-width:140px; background:#fff3e0; padding:12px; border-radius:8px; text-align:center;">
+                    <small style="color:#e65100; font-weight:bold;">المتبقي من العقد</small>
+                    <div style="font-size:20px; font-weight:bold; color:#e65100; margin-top:4px;">{remaining_hrs:.0f} ساعة</div>
+                </div>
+            </div>
+
+            <div style="overflow-x:auto;">
+                <table style="width:100%; border-collapse:collapse;">
+                    <tr>{m_headers}</tr>
+                    <tr>{m_tds}</tr>
+                </table>
+            </div>
+        </div>
+        """
+    else:
         hrs_html = f"""
         <div class="card" style="border-top:4px solid #1565c0;">
-            <h4 style="color:#0d47a1; margin-top:0;">⏱️ سجل الساعات المنفذة لي شهرياً:</h4>
-            <table>
-                <tr><th>الشهر</th><th>عدد الساعات المنفذة</th></tr>
-                {hrs_tr}
-                <tr style="background:#e3f2fd;"><td><b>المجموع الكلي للساعات المنفذة:</b></td><td><b style="color:#2e7d32; font-size:15px;">{total_h} ساعة</b></td></tr>
-            </table>
+            <h4 style="color:#0d47a1; margin-top:0;">📊 ملخص العقد والساعات:</h4>
+            <p style="margin:0; color:#555;">ساعات العقد الإجمالية المسجلة: <b>{int(contract_hrs)} ساعة</b> (في انتظار رفع ملف الساعات المنفذة للمديرية).</p>
         </div>
         """
 
@@ -920,6 +1006,7 @@ def submit_field_attendance():
         return jsonify({"success": True, "message": "تم التحقق الجغرافي بالـ GPS بنجاح وتوثيق حضورك!"})
     return jsonify({"success": False, "message": "الجلسة غير متوفرة"}), 400
 
+@app.uploads('/uploads/<filename>')
 @app.route('/uploads/<filename>')
 def uploaded_file(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
@@ -927,7 +1014,7 @@ def uploaded_file(filename):
 @app.route('/logout')
 def logout():
     session.clear()
-    return redirect(url_for('logout'))
+    return redirect(url_for('login'))
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
