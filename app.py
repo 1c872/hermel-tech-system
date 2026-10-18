@@ -31,30 +31,14 @@ PERIODS_SCHEDULE = {
     9: {"start": "01:30", "end": "02:10", "label": "الحصة التاسعة (01:30 - 02:10)"}
 }
 
-teachers_db = {
-    "teacher_1": {
-        "name": "أستاذ تجريبي",
-        "password": "123",
-        "subject": "معلوماتية",
-        "is_supervisor": True,
-        "floor": "الطابق الأول",
-        "supervisor_classes": ["BP1 الكترونيك", "BP2 معلوماتية"],
-        "is_general_supervisor": True,
-        "device_id": ""  # سيتم حفظ بصمة الهاتف هنا تلقائياً عند أول دخول
-    }
-}
+# المتغيرات الأساسية (تُستعاد من قاعدة البيانات الحقيقية)
+teachers_db = {}
 supervisors_db = {}
 general_supervisors = {}
-
 grades_db = {}
 attendance_db = {}
-teacher_classes_map = {"teacher_1": ["BP2 معلوماتية"]}
-classes_students = {
-    "BP1 الكترونيك": ["علي أحمد شمص", "حسين محمد زعيتر", "حسن علي ناصرالدين"],
-    "BP2 معلوماتية": ["محمد حسين أمهز", "سارة يوسف دندش", "فاطمة أحمد طه"],
-    "BT1 كهرباء": ["مهدي حسن مرتضى", "علي الرضا علوه", "زينب محمد شمص"],
-    "BT2 الكترونيك": ["هادي أحمد ناصرالدين", "زين العابدين خزعل", "فاطمة علي أمهز"]
-}
+teacher_classes_map = {}
+classes_students = {}
 
 admin_replies = []
 admin_credentials = {'username': 'admin', 'password': '123456'}
@@ -94,15 +78,15 @@ def load_from_disk():
         try:
             with open(DB_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                teachers_db = data.get('teachers_db', teachers_db)
-                supervisors_db = data.get('supervisors_db', supervisors_db)
-                general_supervisors = data.get('general_supervisors', general_supervisors)
+                teachers_db = data.get('teachers_db', {})
+                supervisors_db = data.get('supervisors_db', {})
+                general_supervisors = data.get('general_supervisors', {})
                 grades_db = data.get('grades_db', {})
                 attendance_db = data.get('attendance_db', {})
                 teacher_classes_map = data.get('teacher_classes_map', {})
                 admin_replies = data.get('admin_replies', [])
                 admin_credentials = data.get('admin_credentials', {'username': 'admin', 'password': '123456'})
-                classes_students = data.get('classes_students', classes_students)
+                classes_students = data.get('classes_students', {})
                 field_sessions = data.get('field_sessions', [])
                 teacher_absences_log = data.get('teacher_absences_log', [])
                 student_exit_permissions = data.get('student_exit_permissions', [])
@@ -123,7 +107,6 @@ def login():
     if request.method == 'POST':
         username = request.form.get('username', '').strip().lower()
         password = request.form.get('password', '').strip()
-        # توليد بصمة بسيطة للجهاز بناءً على المتصفح والـ User-Agent لمنع التلاعب
         current_device_fingerprint = request.headers.get('User-Agent', 'unknown_device')
         
         if username == admin_credentials['username'] and password == admin_credentials['password']:
@@ -133,13 +116,11 @@ def login():
         elif username in teachers_db and teachers_db[username]['password'] == password:
             t_data = teachers_db[username]
             
-            # نظام فحص الجهاز المربوط
+            # حماية الجهاز وبصمة المتصفح
             if not t_data.get('device_id'):
-                # أول دخول للأستاذ: ربط جهازه الحالي تلقائياً
                 t_data['device_id'] = current_device_fingerprint
                 save_to_disk()
             elif t_data.get('device_id') != current_device_fingerprint:
-                # محاولة الدخول من جهاز آخر غير مسجل
                 error = 'عذراً، هذا الحساب مرتبط بهاتف آخر. يراجع مدير المعهد لإعادة ضبط الجهاز.'
                 return render_template_string(login_template, icon_url=ICON_URL, error=error)
 
@@ -188,10 +169,10 @@ login_template = '''
 
 @app.route('/api/get_students/<class_name>')
 def get_students(class_name):
-    students = classes_students.get(class_name, ["طالب 1", "طالب 2", "طالب 3"])
+    students = classes_students.get(class_name, [])
     return jsonify({'students': students})
 
-# لوحة المدير الرئيسية (مع زر السماح بتغيير الجهاز)
+# لوحة المدير الرئيسية
 @app.route('/admin', methods=['GET', 'POST'])
 def admin_dashboard():
     if session.get('role') != 'admin':
@@ -217,14 +198,14 @@ def admin_dashboard():
                 'device_id': ''
             }
             save_to_disk()
-            msg = f"تم إضافة الأستاذ ({full_name}) بنجاح!"
+            msg = f"تم إضافة الأستاذ ({full_name}) وتوليد بيانات الدخول بنجاح!"
 
         elif action == 'reset_teacher_device':
             target_user = request.form.get('target_user')
             if target_user in teachers_db:
-                teachers_db[target_user]['device_id'] = ''  # تفريغ بصمة الجهاز ليتمكن من التسجيل من الهاتف الجديد
+                teachers_db[target_user]['device_id'] = ''
                 save_to_disk()
-                msg = f"تم مسح بصمة الجهاز القديم للأستاذ ({teachers_db[target_user]['name']}). أصبح بإمكانه الدخول من هاتفه الجديد الآن!"
+                msg = f"تم مسح بصمة الجهاز للأستاذ ({teachers_db[target_user]['name']}) بنجاح. أصبح بإمكانه الدخول من جهازه الجديد!"
 
         elif action == 'assign_supervisor':
             target_user = request.form.get('target_user')
@@ -240,7 +221,7 @@ def admin_dashboard():
                 elif role_type == 'general':
                     teachers_db[target_user]['is_general_supervisor'] = True
                 save_to_disk()
-                msg = f"تم تحديث صلاحيات الأستاذ بنجاح!"
+                msg = f"تم تحديث صلاحيات الأستاذ ({teachers_db[target_user]['name']}) بنجاح!"
 
     teacher_opts = "".join([f"<option value='{u}'>{t['name']} ({u})</option>" for u, t in teachers_db.items()])
     class_checks = "".join([f"<label style='display:inline-block; margin:5px;'><input type='checkbox' name='classes' value='{c}'> {c}</label>" for c in classes_students.keys()])
@@ -250,14 +231,13 @@ def admin_dashboard():
     <html lang="ar" dir="rtl">
     <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>معهد الهرمل الفني - لوحة الإدارة الرئيسية</title>
         <style>
             body { font-family: system-ui, sans-serif; background: #f4f6f9; margin: 0; padding-bottom: 30px; }
             .header { background:#0d47a1; color:white; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; }
             .container { padding: 20px; }
             .card { background: white; padding: 20px; border-radius: 8px; margin-top: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); border-top: 4px solid #0d47a1; }
-            input, select, button { width: 100%; padding: 10px; margin-top: 6px; box-sizing: border-box; font-family: inherit; }
+            input, select, button { width: 100%; padding: 10px; margin-top: 6px; box-sizing: border-box; }
             button { background: #0d47a1; color: white; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; }
             .btn { display:inline-block; background: #1565c0; color: white; padding: 10px 15px; text-decoration:none; border-radius: 5px; font-weight: bold; margin-top: 8px; margin-left: 8px; }
             .msg { background: #e8f5e9; color: #2e7d32; padding: 12px; border-radius: 6px; margin-bottom: 15px; font-weight: bold; }
@@ -269,25 +249,23 @@ def admin_dashboard():
                 <div style="font-weight:bold; font-size:18px;">معهد الهرمل الفني - لوحة المدير الرئيسية</div>
                 <div style="font-size:12px; color:#bbdefb;">رقم المعهد: 84 | العام الدراسي الحالي: 2026-2027</div>
             </div>
-            <div>
-                <a href="/logout" style="color:#ffcdd2; text-decoration:none; font-weight:bold; font-size:13px; background:#c62828; padding:6px 12px; border-radius:4px;">تسجيل الخروج</a>
-            </div>
+            <div><a href="/logout" style="color:#ffcdd2; text-decoration:none; font-weight:bold; font-size:13px; background:#c62828; padding:6px 12px; border-radius:4px;">خروج</a></div>
         </div>
 
         <div class="container">
             {% if msg %}<div class="msg">{{ msg }}</div>{% endif %}
             
             <div class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">🔗 التنقل السريع:</h3>
+                <h3 style="color:#0d47a1; margin-top:0;">🔗 التنقل السريع بين لوحات المعهد:</h3>
                 <a href="/general_supervisor" class="btn" style="background:#2e7d32;">🏛️ الناظر العام</a>
                 <a href="/supervisor" class="btn">📋 ناظر الصفوف</a>
                 <a href="/teacher" class="btn" style="background:#1565c0;">👨‍🏫 صفحة الأساتذة</a>
             </div>
 
-            <!-- زر السماح بتغيير الجهاز -->
+            <!-- إدارة أجهزة الأساتذة -->
             <div class="card" style="border-top-color: #d32f2f; background: #fff8f8;">
                 <h3 style="color:#c62828; margin-top:0;">📱 إدارة أجهزة الأساتذة (السماح بالدخول من هاتف جديد):</h3>
-                <p style="font-size: 13px; color: #555;">إذا قام أستاذ بتغيير هاتفه وأراد تسجيل الدخول من الجهاز الجديد، اختر اسمه واضغط الزر أدناه ليسمح له النظام بحفظ هاتفه الجديد:</p>
+                <p style="font-size: 13px; color: #555;">إذا قام أستاذ بتغيير هاتفه، اختر اسمه واضغط الزر أدناه ليسمح له النظام بربط هاتفه الجديد:</p>
                 <form method="POST">
                     <input type="hidden" name="action" value="reset_teacher_device">
                     <label><b>اختر الأستاذ:</b></label>
@@ -296,42 +274,44 @@ def admin_dashboard():
                 </form>
             </div>
 
+            <!-- إضافة أستاذ وتوليد يوزر وباسورد -->
             <div class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">👤 إضافة أستاذ جديد:</h3>
+                <h3 style="color:#0d47a1; margin-top:0;">👤 إضافة أستاذ جديد وتوليد بيانات الدخول:</h3>
                 <form method="POST">
                     <input type="hidden" name="action" value="add_teacher">
                     <input type="text" name="full_name" placeholder="اسم الأستاذ الثلاثي" required>
                     <input type="text" name="subject" placeholder="المادة" required>
-                    <input type="text" name="username" placeholder="اسم المستخدم" required>
-                    <input type="text" name="password" placeholder="كلمة المرور" required>
-                    <button type="submit" style="margin-top:10px; background:#2e7d32;">حفظ الحساب</button>
+                    <input type="text" name="username" placeholder="اسم المستخدم (Username)" required>
+                    <input type="text" name="password" placeholder="كلمة المرور (Password)" required>
+                    <button type="submit" style="margin-top:10px; background:#2e7d32;">حفظ وإنشاء الحساب</button>
                 </form>
             </div>
 
+            <!-- تكليف الأساتذة كـ ناظر طابق أو ناظر عام -->
             <div class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">🎖️ تكليف مهام إضافية (ناظر طابق / ناظر عام):</h3>
+                <h3 style="color:#0d47a1; margin-top:0;">🎖️ تكليف أستاذ (ناظر طابق) أو (ناظر عام):</h3>
                 <form method="POST">
                     <input type="hidden" name="action" value="assign_supervisor">
                     <label><b>اختر الأستاذ:</b></label>
                     <select name="target_user" required>{{ teacher_opts | safe }}</select>
-                    <label style="margin-top:10px; display:block;"><b>التكليف:</b></label>
+                    <label style="margin-top:10px; display:block;"><b>نوع التكليف:</b></label>
                     <select name="role_type" required>
                         <option value="floor">ناظر طابق / صفوف معينة</option>
                         <option value="general">ناظر عام على سجل الدوام</option>
                     </select>
                     <label style="margin-top:10px; display:block;">الطابق:</label>
                     <input type="text" name="floor" value="الطابق الأول">
-                    <label style="margin-top:10px; display:block;">الصفوف:</label>
+                    <label style="margin-top:10px; display:block;">الصفوف الموكلة للمتابعة:</label>
                     <div>{{ class_checks | safe }}</div>
-                    <button type="submit" style="margin-top:15px;">حفظ التكليف</button>
+                    <button type="submit" style="margin-top:15px;">حفظ وتطبيق التكليف</button>
                 </form>
             </div>
         </div>
-        <div style="text-align:center; margin-top:30px; color:#666; font-size:12.5px;">🛠️ تم تصميم وتطوير البرنامج من قبل الأستاذ محمد حسين شمص</div>
     </body>
     </html>
     ''', teacher_opts=teacher_opts, class_checks=class_checks, msg=msg)
 
+# لوحة الناظر العام
 @app.route('/general_supervisor', methods=['GET', 'POST'])
 def general_supervisor_dashboard():
     if session.get('role') not in ['general_supervisor', 'admin', 'teacher']: 
@@ -349,7 +329,7 @@ def general_supervisor_dashboard():
         notes = request.form.get('notes', '')
         teacher_absences_log.append({'date': log_date, 'teacher_name': t_name, 'missed_periods': [int(p) for p in missed_periods], 'notes': notes})
         save_to_disk()
-        msg = "تم تسجيل الغياب بنجاح!"
+        msg = "تم تسجيل غياب الحصص بنجاح!"
 
     day_absences = [a for a in teacher_absences_log if a['date'] == selected_date]
     abs_rows = "".join([f"<tr><td><b>{a['teacher_name']}</b></td><td>الحصص: {a['missed_periods']}</td><td>{a['notes']}</td></tr>" for a in day_absences])
@@ -375,33 +355,34 @@ def general_supervisor_dashboard():
     </head>
     <body>
         <div style="background:#0d47a1; color:white; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; border-radius:8px;">
-            <h3 style="margin:0;">🏛️ صفحة الناظر العام</h3>
+            <h3 style="margin:0;">🏛️ صفحة الناظر العام: {{ user_info.get('name', 'الإدارة') }}</h3>
             <a href="/logout" style="color:white; background:#c62828; padding:6px 12px; border-radius:4px; text-decoration:none;">خروج</a>
         </div>
         <div class="nav-bar" style="margin-top:10px;">
-            <span style="color:white; font-weight:bold; align-self:center;">الانتقال:</span>
+            <span style="color:white; font-weight:bold; align-self:center;">الانتقال بين الأدوار:</span>
             <a href="/teacher">👨‍🏫 واجهة الأستاذ</a>
             {% if user_info.get('is_supervisor') or session.get('username') == 'admin' %}<a href="/supervisor">📋 ناظر الصفوف</a>{% endif %}
-            {% if session.get('username') == 'admin' %}<a href="/admin" style="background:#2e7d32;">🏠 المدير</a>{% endif %}
+            {% if session.get('username') == 'admin' %}<a href="/admin" style="background:#2e7d32;">🏠 واجهة المدير</a>{% endif %}
         </div>
         {% if msg %}<div style="background:#e8f5e9; color:#2e7d32; padding:10px; border-radius:6px; margin-top:15px;">{{ msg }}</div>{% endif %}
         <div class="card">
-            <h3 style="color:#0d47a1; margin-top:0;">📅 تقويم رصد غياب الحصص:</h3>
+            <h3 style="color:#0d47a1; margin-top:0;">📅 تقويم رصد غياب الحصص للأساتذة:</h3>
             <form method="POST">
                 <input type="hidden" name="action" value="log_teacher_absence">
                 <input type="date" name="log_date" value="{{ selected_date }}" required>
-                <select name="teacher_name" required>{{ teacher_opts | safe }}</select>
+                <select name="teacher_name" required><option value="">-- اختر الأستاذ --</option>{{ teacher_opts | safe }}</select>
                 <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:5px;">
                     {% for i in range(1, 10) %}<label style="background:#e3f2fd; padding:6px 10px; border-radius:4px;"><input type="checkbox" name="periods" value="{{ i }}"> الحصة {{ i }}</label>{% endfor %}
                 </div>
-                <input type="text" name="notes" placeholder="ملاحظات">
-                <button type="submit" style="background:#c62828; margin-top:10px;">تسجيل الغياب</button>
+                <input type="text" name="notes" placeholder="ملاحظات أو سبب الغياب">
+                <button type="submit" style="background:#c62828; margin-top:10px;">تسجيل غياب الحصص</button>
             </form>
         </div>
     </body>
     </html>
     ''', selected_date=selected_date, teacher_opts=teacher_opts, user_info=user_info, msg=msg)
 
+# لوحة ناظر الصفوف
 @app.route('/supervisor', methods=['GET', 'POST'])
 def supervisor_dashboard():
     if session.get('role') not in ['supervisor', 'admin', 'teacher']: 
@@ -409,7 +390,7 @@ def supervisor_dashboard():
     
     username = session.get('username')
     user_info = teachers_db.get(username, {})
-    sup_data = {"name": user_info.get('name', 'ناظر'), "floor": user_info.get('floor', 'الطابق الأول'), "classes": user_info.get('supervisor_classes', [])} if username != 'admin' else {"name": "مدير المعهد", "floor": "الإدارة العامة", "classes": list(classes_students.keys())}
+    sup_data = {"name": user_info.get('name', 'ناظر'), "floor": user_info.get('floor', 'الطابق الأول'), "classes": user_info.get('supervisor_classes', list(classes_students.keys()))} if username != 'admin' else {"name": "مدير المعهد", "floor": "الإدارة العامة", "classes": list(classes_students.keys())}
     msg = ''
 
     if request.method == 'POST' and request.form.get('action') == 'submit_supervisor_attendance':
@@ -419,7 +400,7 @@ def supervisor_dashboard():
         teacher_status = request.form.get('teacher_status')
         attendance_db[f"ناظر - {c_name} - الحصة {period_num}"] = {'present': present_sts, 'teacher_status': teacher_status}
         save_to_disk()
-        msg = "تم تسجيل الحصة بنجاح!"
+        msg = "تم تسجيل تقرير الحصة بنجاح!"
 
     class_opts = "".join([f'<option value="{c}">{c}</option>' for c in sup_data.get('classes', [])])
     period_opts = "".join([f'<option value="{k}">{v["label"]}</option>' for k, v in PERIODS_SCHEDULE.items()])
@@ -445,23 +426,23 @@ def supervisor_dashboard():
             <a href="/logout" style="color:white; background:#c62828; padding:6px 12px; border-radius:4px; text-decoration:none;">خروج</a>
         </div>
         <div class="nav-bar" style="margin-top:10px;">
-            <span style="color:white; font-weight:bold; align-self:center;">الانتقال:</span>
+            <span style="color:white; font-weight:bold; align-self:center;">الانتقال بين الأدوار:</span>
             <a href="/teacher">👨‍🏫 واجهة الأستاذ</a>
             {% if user_info.get('is_general_supervisor') or session.get('username') == 'admin' %}<a href="/general_supervisor">🏛️ الناظر العام</a>{% endif %}
-            {% if session.get('username') == 'admin' %}<a href="/admin" style="background:#2e7d32;">🏠 المدير</a>{% endif %}
+            {% if session.get('username') == 'admin' %}<a href="/admin" style="background:#2e7d32;">🏠 واجهة المدير</a>{% endif %}
         </div>
         {% if msg %}<div style="background:#e8f5e9; color:#2e7d32; padding:10px; border-radius:6px; margin-top:15px;">{{ msg }}</div>{% endif %}
         <div class="card">
-            <h3 style="color:#0d47a1; margin-top:0;">📋 رصد الحصص</h3>
+            <h3 style="color:#0d47a1; margin-top:0;">📋 رصد الحصص ومتابعة التزام الأساتذة</h3>
             <form method="POST">
                 <input type="hidden" name="action" value="submit_supervisor_attendance">
                 <select name="period_num" required>{{ period_opts | safe }}</select>
                 <select name="class_name" required><option value="">-- اختر الصف --</option>{{ class_opts | safe }}</select>
                 <div style="margin-top:15px; background:#fff3e0; padding:15px; border-radius:6px;">
-                    <label style="font-weight:bold; color:#e65100;">لتزام الأستاذ:</label><br>
-                    <input type="radio" name="teacher_status" value="present" checked style="width:auto;"> ✅ حاضر<br>
-                    <input type="radio" name="teacher_status" value="absent" style="width:auto;"> ❌ متغيب<br>
-                    <input type="radio" name="teacher_status" value="escaped" style="width:auto;"> 🚨 تهرب ومغادرة
+                    <label style="font-weight:bold; color:#e65100;">التزام أستاذ هذه الحصة:</label><br>
+                    <input type="radio" name="teacher_status" value="present" checked style="width:auto;"> ✅ حاضر ويدرس بالحصة<br>
+                    <input type="radio" name="teacher_status" value="absent" style="width:auto;"> ❌ متغيب تماماً<br>
+                    <input type="radio" name="teacher_status" value="escaped" style="width:auto;"> 🚨 تهرب ومغادرة الصف
                 </div>
                 <button type="submit" style="margin-top:15px; background:#2e7d32;">حفظ التقرير</button>
             </form>
@@ -470,6 +451,7 @@ def supervisor_dashboard():
     </html>
     ''', sup_name=sup_data.get('name'), class_opts=class_opts, period_opts=period_opts, user_info=user_info, msg=msg)
 
+# لوحة الأستاذ
 @app.route('/teacher', methods=['GET', 'POST'])
 def teacher_dashboard():
     if session.get('role') not in ['teacher', 'admin']: return redirect(url_for('login'))
@@ -490,18 +472,18 @@ def teacher_dashboard():
     </head>
     <body>
         <div style="background:#0d47a1; color:white; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; border-radius:8px;">
-            <h3 style="margin:0;">أهلاً بك الأستاذ: {{ user_info.get('name') }}</h3>
+            <h3 style="margin:0;">أهلاً بك الأستاذ: {{ user_info.get('name', 'مدير النظام') }}</h3>
             <a href="/logout" style="color:white; background:#c62828; padding:6px 12px; border-radius:4px; text-decoration:none;">خروج</a>
         </div>
         <div class="nav-bar" style="margin-top:10px;">
-            <span style="color:white; font-weight:bold; align-self:center;">الانتقال:</span>
+            <span style="color:white; font-weight:bold; align-self:center;">الانتقال بين الأدوار:</span>
             {% if user_info.get('is_supervisor') or session.get('username') == 'admin' %}<a href="/supervisor">📋 ناظر الصفوف</a>{% endif %}
             {% if user_info.get('is_general_supervisor') or session.get('username') == 'admin' %}<a href="/general_supervisor">🏛️ الناظر العام</a>{% endif %}
-            {% if session.get('username') == 'admin' %}<a href="/admin" style="background:#2e7d32;">🏠 المدير</a>{% endif %}
+            {% if session.get('username') == 'admin' %}<a href="/admin" style="background:#2e7d32;">🏠 واجهة المدير</a>{% endif %}
         </div>
         <div class="card">
             <h3 style="color:#0d47a1; margin-top:0;">📚 واجهة تدريس المواد</h3>
-            <p>مرحباً بك. نظام حماية الجهاز مفعل؛ الحساب مرتبط بهاتفك الشخصي حصراً.</p>
+            <p>مرحباً بك. تم تفعيل نظام حماية الأجهزة (Device Binding) لحسابك لضمان عدم مشاركة كلمة المرور مع أي جهة خارجية أثناء التدريب الميداني.</p>
         </div>
     </body>
     </html>
