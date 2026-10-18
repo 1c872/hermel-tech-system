@@ -19,7 +19,6 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 DB_FILE = 'database.json'
 BACKUP_FILE = 'database_backup.json'
 
-# جدول الحصص الرسمي المعتمد في المعهد
 PERIODS_SCHEDULE = {
     1: {"start": "07:50", "end": "08:30", "label": "الحصة الأولى (07:50 - 08:30)"},
     2: {"start": "08:30", "end": "09:10", "label": "الحصة الثانية (08:30 - 09:10)"},
@@ -32,19 +31,24 @@ PERIODS_SCHEDULE = {
     9: {"start": "01:30", "end": "02:10", "label": "الحصة التاسعة (01:30 - 02:10)"}
 }
 
-teachers_db = {}
-supervisors_db = {
-    "sup_1": {
-        "name": "أحمد الأحمد",
+teachers_db = {
+    "teacher_1": {
+        "name": "أستاذ تجريبي",
         "password": "123",
+        "subject": "معلوماتية",
+        "is_supervisor": True,
         "floor": "الطابق الأول",
-        "classes": ["BP1 الكترونيك", "BP2 معلوماتية"]
+        "supervisor_classes": ["BP1 الكترونيك", "BP2 معلوماتية"],
+        "is_general_supervisor": True,
+        "device_id": ""  # سيتم حفظ بصمة الهاتف هنا تلقائياً عند أول دخول
     }
 }
-general_supervisors = {'general_admin': {'name': 'الناظر العام', 'password': '123'}}
+supervisors_db = {}
+general_supervisors = {}
+
 grades_db = {}
 attendance_db = {}
-teacher_classes_map = {}
+teacher_classes_map = {"teacher_1": ["BP2 معلوماتية"]}
 classes_students = {
     "BP1 الكترونيك": ["علي أحمد شمص", "حسين محمد زعيتر", "حسن علي ناصرالدين"],
     "BP2 معلوماتية": ["محمد حسين أمهز", "سارة يوسف دندش", "فاطمة أحمد طه"],
@@ -58,6 +62,7 @@ current_academic_year = "2026-2027"
 field_sessions = []
 teacher_absences_log = []   
 student_exit_permissions = [] 
+teacher_exits_log = []
 
 def save_to_disk():
     try:
@@ -73,7 +78,8 @@ def save_to_disk():
             'classes_students': classes_students,
             'field_sessions': field_sessions,
             'teacher_absences_log': teacher_absences_log,
-            'student_exit_permissions': student_exit_permissions
+            'student_exit_permissions': student_exit_permissions,
+            'teacher_exits_log': teacher_exits_log
         }
         with open(DB_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -83,12 +89,12 @@ def save_to_disk():
 
 def load_from_disk():
     global teachers_db, supervisors_db, general_supervisors, grades_db, attendance_db, teacher_classes_map
-    global admin_replies, admin_credentials, classes_students, field_sessions, teacher_absences_log, student_exit_permissions
+    global admin_replies, admin_credentials, classes_students, field_sessions, teacher_absences_log, student_exit_permissions, teacher_exits_log
     if os.path.exists(DB_FILE):
         try:
             with open(DB_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                teachers_db = data.get('teachers_db', {})
+                teachers_db = data.get('teachers_db', teachers_db)
                 supervisors_db = data.get('supervisors_db', supervisors_db)
                 general_supervisors = data.get('general_supervisors', general_supervisors)
                 grades_db = data.get('grades_db', {})
@@ -100,6 +106,7 @@ def load_from_disk():
                 field_sessions = data.get('field_sessions', [])
                 teacher_absences_log = data.get('teacher_absences_log', [])
                 student_exit_permissions = data.get('student_exit_permissions', [])
+                teacher_exits_log = data.get('teacher_exits_log', [])
                 return True
         except Exception as e:
             print(f"Error loading database: {e}")
@@ -116,19 +123,39 @@ def login():
     if request.method == 'POST':
         username = request.form.get('username', '').strip().lower()
         password = request.form.get('password', '').strip()
+        # توليد بصمة بسيطة للجهاز بناءً على المتصفح والـ User-Agent لمنع التلاعب
+        current_device_fingerprint = request.headers.get('User-Agent', 'unknown_device')
         
         if username == admin_credentials['username'] and password == admin_credentials['password']:
             session['username'] = 'admin'
             session['role'] = 'admin'
-            return redirect(url_for('supervisor_dashboard'))
-        elif username in supervisors_db and supervisors_db[username]['password'] == password:
+            return redirect(url_for('admin_dashboard'))
+        elif username in teachers_db and teachers_db[username]['password'] == password:
+            t_data = teachers_db[username]
+            
+            # نظام فحص الجهاز المربوط
+            if not t_data.get('device_id'):
+                # أول دخول للأستاذ: ربط جهازه الحالي تلقائياً
+                t_data['device_id'] = current_device_fingerprint
+                save_to_disk()
+            elif t_data.get('device_id') != current_device_fingerprint:
+                # محاولة الدخول من جهاز آخر غير مسجل
+                error = 'عذراً، هذا الحساب مرتبط بهاتف آخر. يراجع مدير المعهد لإعادة ضبط الجهاز.'
+                return render_template_string(login_template, icon_url=ICON_URL, error=error)
+
             session['username'] = username
-            session['role'] = 'supervisor'
-            return redirect(url_for('supervisor_dashboard'))
+            session['role'] = 'teacher'
+            if t_data.get('is_general_supervisor'):
+                return redirect(url_for('general_supervisor_dashboard'))
+            elif t_data.get('is_supervisor'):
+                return redirect(url_for('supervisor_dashboard'))
+            return redirect(url_for('teacher_dashboard'))
         else:
             error = 'اسم المستخدم أو كلمة المرور غير صحيحة'
             
-    return render_template_string('''
+    return render_template_string(login_template, icon_url=ICON_URL, error=error)
+
+login_template = '''
     <!DOCTYPE html>
     <html lang="ar" dir="rtl">
     <head>
@@ -157,79 +184,66 @@ def login():
         <div style="margin-top: 25px; color: #5c6bc0; font-size: 12px;">🛠️ تم تصميم وتطوير البرنامج من قبل الأستاذ محمد حسين شمص</div>
     </body>
     </html>
-    ''', icon_url=ICON_URL, error=error)
+'''
 
 @app.route('/api/get_students/<class_name>')
 def get_students(class_name):
     students = classes_students.get(class_name, ["طالب 1", "طالب 2", "طالب 3"])
     return jsonify({'students': students})
 
-@app.route('/supervisor', methods=['GET', 'POST'])
-def supervisor_dashboard():
-    if session.get('role') not in ['supervisor', 'admin']: 
+# لوحة المدير الرئيسية (مع زر السماح بتغيير الجهاز)
+@app.route('/admin', methods=['GET', 'POST'])
+def admin_dashboard():
+    if session.get('role') != 'admin':
         return redirect(url_for('login'))
-    
-    username = session.get('username')
-    if username == 'admin':
-        sup_data = {"name": "مدير النظام", "floor": "الإدارة العامة", "classes": list(classes_students.keys())}
-    else:
-        sup_data = supervisors_db.get(username, {"name": "ناظر", "floor": "الطابق الأول", "classes": []})
         
-    assigned_classes = sup_data.get('classes', [])
-    floor_name = sup_data.get('floor', 'الطابق الأول')
-    msg = ''
-
+    msg = session.pop('msg', '')
+    
     if request.method == 'POST':
         action = request.form.get('action')
         
-        if action == 'submit_supervisor_attendance':
-            c_name = request.form.get('class_name')
-            period_num = request.form.get('period_num')
-            present_sts = request.form.getlist('attendance_check')
-            teacher_status = request.form.get('teacher_status')
+        if action == 'add_teacher':
+            u_name = request.form.get('username').strip().lower()
+            pwd = request.form.get('password').strip()
+            full_name = request.form.get('full_name').strip()
+            subject = request.form.get('subject').strip()
             
-            all_sts = classes_students.get(c_name, [])
-            absent_sts = [s for s in all_sts if s not in present_sts]
-            date_str = datetime.now().strftime('%Y-%m-%d %H:%M')
-            
-            attendance_db[f"ناظر ({floor_name}) - {c_name} - الحصة {period_num} ({date_str})"] = {
-                'present': present_sts,
-                'absent': absent_sts,
-                'teacher_status': teacher_status,
-                'logged_by': sup_data.get('name')
+            teachers_db[u_name] = {
+                'name': full_name,
+                'password': pwd,
+                'subject': subject,
+                'is_supervisor': False,
+                'is_general_supervisor': False,
+                'device_id': ''
             }
-            
-            if teacher_status in ['absent', 'escaped']:
-                status_txt = "متغيب تماماً عن الحصة" if teacher_status == 'absent' else "توقيع شكلي ثم تهرب ومغادرة الصف!"
-                admin_replies.append({
-                    'teacher_name': f"تقرير الناظر: {sup_data.get('name')} ({floor_name})",
-                    'message': f"🚨 بلاغ عاجل للمدير: أستاذ صف ({c_name}) للحصة ({period_num}) - حالة الأستاذ: {status_txt}",
-                    'report': None,
-                    'date': datetime.now().strftime('%Y-%m-%d %H:%M')
-                })
             save_to_disk()
-            msg = f"تم تسجيل تقرير الحصة {period_num} لصف {c_name} بنجاح!"
+            msg = f"تم إضافة الأستاذ ({full_name}) بنجاح!"
 
-        elif action == 'log_student_exit':
-            st_name = request.form.get('student_name')
-            c_name = request.form.get('class_name')
-            p_num = request.form.get('period_num')
-            exit_time = request.form.get('exit_time')
+        elif action == 'reset_teacher_device':
+            target_user = request.form.get('target_user')
+            if target_user in teachers_db:
+                teachers_db[target_user]['device_id'] = ''  # تفريغ بصمة الجهاز ليتمكن من التسجيل من الهاتف الجديد
+                save_to_disk()
+                msg = f"تم مسح بصمة الجهاز القديم للأستاذ ({teachers_db[target_user]['name']}). أصبح بإمكانه الدخول من هاتفه الجديد الآن!"
+
+        elif action == 'assign_supervisor':
+            target_user = request.form.get('target_user')
+            role_type = request.form.get('role_type')
+            floor = request.form.get('floor', 'الطابق الأول')
+            selected_classes = request.form.getlist('classes')
             
-            student_exit_permissions.append({
-                'date': datetime.now().strftime('%Y-%m-%d'),
-                'student_name': st_name,
-                'class_name': c_name,
-                'period': p_num,
-                'time': exit_time,
-                'floor': floor_name,
-                'supervisor': sup_data.get('name')
-            })
-            save_to_disk()
-            msg = f"تم توثيق إذن خروج الطالب ({st_name}) للحصة ({p_num}) عند الساعة ({exit_time})!"
+            if target_user in teachers_db:
+                if role_type == 'floor':
+                    teachers_db[target_user]['is_supervisor'] = True
+                    teachers_db[target_user]['floor'] = floor
+                    teachers_db[target_user]['supervisor_classes'] = selected_classes
+                elif role_type == 'general':
+                    teachers_db[target_user]['is_general_supervisor'] = True
+                save_to_disk()
+                msg = f"تم تحديث صلاحيات الأستاذ بنجاح!"
 
-    class_opts = "".join([f'<option value="{c}">{c}</option>' for c in assigned_classes])
-    period_opts = "".join([f'<option value="{k}">{v["label"]}</option>' for k, v in PERIODS_SCHEDULE.items()])
+    teacher_opts = "".join([f"<option value='{u}'>{t['name']} ({u})</option>" for u, t in teachers_db.items()])
+    class_checks = "".join([f"<label style='display:inline-block; margin:5px;'><input type='checkbox' name='classes' value='{c}'> {c}</label>" for c in classes_students.keys()])
 
     return render_template_string('''
     <!DOCTYPE html>
@@ -237,100 +251,261 @@ def supervisor_dashboard():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>لوحة الناظر - معهد الهرمل الفني</title>
+        <title>معهد الهرمل الفني - لوحة الإدارة الرئيسية</title>
+        <style>
+            body { font-family: system-ui, sans-serif; background: #f4f6f9; margin: 0; padding-bottom: 30px; }
+            .header { background:#0d47a1; color:white; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; }
+            .container { padding: 20px; }
+            .card { background: white; padding: 20px; border-radius: 8px; margin-top: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); border-top: 4px solid #0d47a1; }
+            input, select, button { width: 100%; padding: 10px; margin-top: 6px; box-sizing: border-box; font-family: inherit; }
+            button { background: #0d47a1; color: white; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; }
+            .btn { display:inline-block; background: #1565c0; color: white; padding: 10px 15px; text-decoration:none; border-radius: 5px; font-weight: bold; margin-top: 8px; margin-left: 8px; }
+            .msg { background: #e8f5e9; color: #2e7d32; padding: 12px; border-radius: 6px; margin-bottom: 15px; font-weight: bold; }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <div>
+                <div style="font-weight:bold; font-size:18px;">معهد الهرمل الفني - لوحة المدير الرئيسية</div>
+                <div style="font-size:12px; color:#bbdefb;">رقم المعهد: 84 | العام الدراسي الحالي: 2026-2027</div>
+            </div>
+            <div>
+                <a href="/logout" style="color:#ffcdd2; text-decoration:none; font-weight:bold; font-size:13px; background:#c62828; padding:6px 12px; border-radius:4px;">تسجيل الخروج</a>
+            </div>
+        </div>
+
+        <div class="container">
+            {% if msg %}<div class="msg">{{ msg }}</div>{% endif %}
+            
+            <div class="card">
+                <h3 style="color:#0d47a1; margin-top:0;">🔗 التنقل السريع:</h3>
+                <a href="/general_supervisor" class="btn" style="background:#2e7d32;">🏛️ الناظر العام</a>
+                <a href="/supervisor" class="btn">📋 ناظر الصفوف</a>
+                <a href="/teacher" class="btn" style="background:#1565c0;">👨‍🏫 صفحة الأساتذة</a>
+            </div>
+
+            <!-- زر السماح بتغيير الجهاز -->
+            <div class="card" style="border-top-color: #d32f2f; background: #fff8f8;">
+                <h3 style="color:#c62828; margin-top:0;">📱 إدارة أجهزة الأساتذة (السماح بالدخول من هاتف جديد):</h3>
+                <p style="font-size: 13px; color: #555;">إذا قام أستاذ بتغيير هاتفه وأراد تسجيل الدخول من الجهاز الجديد، اختر اسمه واضغط الزر أدناه ليسمح له النظام بحفظ هاتفه الجديد:</p>
+                <form method="POST">
+                    <input type="hidden" name="action" value="reset_teacher_device">
+                    <label><b>اختر الأستاذ:</b></label>
+                    <select name="target_user" required>{{ teacher_opts | safe }}</select>
+                    <button type="submit" style="margin-top:10px; background:#c62828;">🔓 السماح بتسجيل الجهاز الجديد للأستاذ</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <h3 style="color:#0d47a1; margin-top:0;">👤 إضافة أستاذ جديد:</h3>
+                <form method="POST">
+                    <input type="hidden" name="action" value="add_teacher">
+                    <input type="text" name="full_name" placeholder="اسم الأستاذ الثلاثي" required>
+                    <input type="text" name="subject" placeholder="المادة" required>
+                    <input type="text" name="username" placeholder="اسم المستخدم" required>
+                    <input type="text" name="password" placeholder="كلمة المرور" required>
+                    <button type="submit" style="margin-top:10px; background:#2e7d32;">حفظ الحساب</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <h3 style="color:#0d47a1; margin-top:0;">🎖️ تكليف مهام إضافية (ناظر طابق / ناظر عام):</h3>
+                <form method="POST">
+                    <input type="hidden" name="action" value="assign_supervisor">
+                    <label><b>اختر الأستاذ:</b></label>
+                    <select name="target_user" required>{{ teacher_opts | safe }}</select>
+                    <label style="margin-top:10px; display:block;"><b>التكليف:</b></label>
+                    <select name="role_type" required>
+                        <option value="floor">ناظر طابق / صفوف معينة</option>
+                        <option value="general">ناظر عام على سجل الدوام</option>
+                    </select>
+                    <label style="margin-top:10px; display:block;">الطابق:</label>
+                    <input type="text" name="floor" value="الطابق الأول">
+                    <label style="margin-top:10px; display:block;">الصفوف:</label>
+                    <div>{{ class_checks | safe }}</div>
+                    <button type="submit" style="margin-top:15px;">حفظ التكليف</button>
+                </form>
+            </div>
+        </div>
+        <div style="text-align:center; margin-top:30px; color:#666; font-size:12.5px;">🛠️ تم تصميم وتطوير البرنامج من قبل الأستاذ محمد حسين شمص</div>
+    </body>
+    </html>
+    ''', teacher_opts=teacher_opts, class_checks=class_checks, msg=msg)
+
+@app.route('/general_supervisor', methods=['GET', 'POST'])
+def general_supervisor_dashboard():
+    if session.get('role') not in ['general_supervisor', 'admin', 'teacher']: 
+        return redirect(url_for('login'))
+    
+    username = session.get('username')
+    user_info = teachers_db.get(username, {})
+    selected_date = request.form.get('filter_date', datetime.now().strftime('%Y-%m-%d'))
+    msg = ''
+
+    if request.method == 'POST' and request.form.get('action') == 'log_teacher_absence':
+        t_name = request.form.get('teacher_name')
+        log_date = request.form.get('log_date')
+        missed_periods = request.form.getlist('periods')
+        notes = request.form.get('notes', '')
+        teacher_absences_log.append({'date': log_date, 'teacher_name': t_name, 'missed_periods': [int(p) for p in missed_periods], 'notes': notes})
+        save_to_disk()
+        msg = "تم تسجيل الغياب بنجاح!"
+
+    day_absences = [a for a in teacher_absences_log if a['date'] == selected_date]
+    abs_rows = "".join([f"<tr><td><b>{a['teacher_name']}</b></td><td>الحصص: {a['missed_periods']}</td><td>{a['notes']}</td></tr>" for a in day_absences])
+    teacher_opts = "".join([f"<option value='{t['name']}'>{t['name']}</option>" for u, t in teachers_db.items()])
+
+    return render_template_string('''
+    <!DOCTYPE html>
+    <html lang="ar" dir="rtl">
+    <head>
+        <meta charset="UTF-8">
+        <title>سجل الدوام - الناظر العام</title>
         <style>
             body { font-family: system-ui, sans-serif; background: #f4f6f9; margin: 0; padding: 20px; }
             .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); border-top: 4px solid #0d47a1; margin-top: 15px; }
-            select, input, button { width: 100%; padding: 10px; margin-top: 8px; box-sizing: border-box; font-family: inherit; }
-            button { background: #0d47a1; color: white; font-weight: bold; border: none; cursor: pointer; border-radius: 5px; }
-            .student-row { display: flex; justify-content: space-between; padding: 8px; border-bottom: 1px solid #eee; }
+            input, select, button { width: 100%; padding: 10px; margin-top: 6px; box-sizing: border-box; }
+            button { background: #0d47a1; color: white; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; }
+            .nav-bar { background:#1565c0; padding:10px; border-radius:6px; margin-bottom:15px; display:flex; gap:10px; }
+            .nav-bar a { color:white; text-decoration:none; font-weight:bold; padding:6px 12px; background:#0d47a1; border-radius:4px; font-size:13px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+            th, td { border: 1px solid #ddd; padding: 8px; text-align: center; font-size: 13px; }
+            th { background: #0d47a1; color: white; }
         </style>
     </head>
     <body>
         <div style="background:#0d47a1; color:white; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; border-radius:8px;">
-            <div>
-                <h3 style="margin:0;">صفحة الناظر: {{ sup_name }}</h3>
-                <small style="color:#bbdefb;">المسؤول عن: {{ floor_name }} | الصفوف المتاحة</small>
-            </div>
+            <h3 style="margin:0;">🏛️ صفحة الناظر العام</h3>
             <a href="/logout" style="color:white; background:#c62828; padding:6px 12px; border-radius:4px; text-decoration:none;">خروج</a>
         </div>
-
-        {% if msg %}
-        <div style="background:#e8f5e9; color:#2e7d32; padding:10px; border-radius:6px; margin-top:15px; font-weight:bold;">{{ msg }}</div>
-        {% endif %}
-
+        <div class="nav-bar" style="margin-top:10px;">
+            <span style="color:white; font-weight:bold; align-self:center;">الانتقال:</span>
+            <a href="/teacher">👨‍🏫 واجهة الأستاذ</a>
+            {% if user_info.get('is_supervisor') or session.get('username') == 'admin' %}<a href="/supervisor">📋 ناظر الصفوف</a>{% endif %}
+            {% if session.get('username') == 'admin' %}<a href="/admin" style="background:#2e7d32;">🏠 المدير</a>{% endif %}
+        </div>
+        {% if msg %}<div style="background:#e8f5e9; color:#2e7d32; padding:10px; border-radius:6px; margin-top:15px;">{{ msg }}</div>{% endif %}
         <div class="card">
-            <h3 style="color:#0d47a1; margin-top:0;">📋 رصد الحصص وتغيب/تهرب الأساتذة ({{ floor_name }})</h3>
+            <h3 style="color:#0d47a1; margin-top:0;">📅 تقويم رصد غياب الحصص:</h3>
             <form method="POST">
-                <input type="hidden" name="action" value="submit_supervisor_attendance">
-                
-                <label><b>1. اختر الحصة الدراسية:</b></label>
-                <select name="period_num" required>{{ period_opts | safe }}</select>
-
-                <label style="margin-top:10px; display:block;"><b>2. اختر الصف:</b></label>
-                <select name="class_name" id="supClassSelect" onchange="loadSupStudents()" required>
-                    <option value="">-- اختر الصف --</option>
-                    {{ class_opts | safe }}
-                </select>
-
-                <div id="supStudentsContainer" style="margin-top:15px;"></div>
-
-                <div style="margin-top:15px; background:#fff3e0; padding:15px; border-radius:6px; border-right:4px solid #e65100;">
-                    <label style="font-weight:bold; color:#e65100;">🕵️‍♂️ التزام أستاذ هذه الحصة:</label><br>
-                    <div style="margin-top:8px;">
-                        <input type="radio" name="teacher_status" value="present" checked style="width:auto;"> ✅ الأستاذ حاضر ويدرس بالحصة<br>
-                        <input type="radio" name="teacher_status" value="absent" style="width:auto;"> ❌ الأستاذ متغيب عن الحصة<br>
-                        <input type="radio" name="teacher_status" value="escaped" style="width:auto;"> 🚨 توقيع شكلي ثم تهرب ومغادرة الصف!
-                    </div>
+                <input type="hidden" name="action" value="log_teacher_absence">
+                <input type="date" name="log_date" value="{{ selected_date }}" required>
+                <select name="teacher_name" required>{{ teacher_opts | safe }}</select>
+                <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:5px;">
+                    {% for i in range(1, 10) %}<label style="background:#e3f2fd; padding:6px 10px; border-radius:4px;"><input type="checkbox" name="periods" value="{{ i }}"> الحصة {{ i }}</label>{% endfor %}
                 </div>
-
-                <button type="submit" id="supSubmitBtn" style="display:none; margin-top:15px; background:#2e7d32;">تأكيد وتوثيق تقرير الحصة</button>
+                <input type="text" name="notes" placeholder="ملاحظات">
+                <button type="submit" style="background:#c62828; margin-top:10px;">تسجيل الغياب</button>
             </form>
         </div>
-
-        <div class="card">
-            <h3 style="color:#0d47a1; margin-top:0;">🚪 تسجيل إذن خروج طالب أثناء الحصة</h3>
-            <form method="POST">
-                <input type="hidden" name="action" value="log_student_exit">
-                <input type="text" name="student_name" placeholder="اسم الطالب الثلاثي" required>
-                <select name="class_name" required>
-                    <option value="">-- اختر صف الطالب --</option>
-                    {{ class_opts | safe }}
-                </select>
-                <select name="period_num" required>{{ period_opts | safe }}</select>
-                <input type="time" name="exit_time" required>
-                <button type="submit" style="background:#1565c0;">تسجيل إذن خروج الطالب</button>
-            </form>
-        </div>
-
-        <script>
-            function loadSupStudents() {
-                let cName = document.getElementById('supClassSelect').value;
-                let container = document.getElementById('supStudentsContainer');
-                let submitBtn = document.getElementById('supSubmitBtn');
-                container.innerHTML = '';
-
-                if (!cName) { submitBtn.style.display = 'none'; return; }
-
-                fetch('/api/get_students/' + encodeURIComponent(cName))
-                    .then(res => res.json())
-                    .then(data => {
-                        let html = '<p style="font-size:13px; color:#0d47a1; font-weight:bold;">حدد الطلاب الحاضرين لهذه الحصة:</p>';
-                        data.students.forEach(st => {
-                            html += `
-                            <div class="student-row">
-                                <span>${st}</span>
-                                <input type="checkbox" name="attendance_check" value="${st}" checked style="width:auto;">
-                            </div>`;
-                        });
-                        container.innerHTML = html;
-                        submitBtn.style.display = 'block';
-                    });
-            }
-        </script>
     </body>
     </html>
-    ''', sup_name=sup_data.get('name'), floor_name=floor_name, class_opts=class_opts, period_opts=period_opts, msg=msg)
+    ''', selected_date=selected_date, teacher_opts=teacher_opts, user_info=user_info, msg=msg)
+
+@app.route('/supervisor', methods=['GET', 'POST'])
+def supervisor_dashboard():
+    if session.get('role') not in ['supervisor', 'admin', 'teacher']: 
+        return redirect(url_for('login'))
+    
+    username = session.get('username')
+    user_info = teachers_db.get(username, {})
+    sup_data = {"name": user_info.get('name', 'ناظر'), "floor": user_info.get('floor', 'الطابق الأول'), "classes": user_info.get('supervisor_classes', [])} if username != 'admin' else {"name": "مدير المعهد", "floor": "الإدارة العامة", "classes": list(classes_students.keys())}
+    msg = ''
+
+    if request.method == 'POST' and request.form.get('action') == 'submit_supervisor_attendance':
+        c_name = request.form.get('class_name')
+        period_num = request.form.get('period_num')
+        present_sts = request.form.getlist('attendance_check')
+        teacher_status = request.form.get('teacher_status')
+        attendance_db[f"ناظر - {c_name} - الحصة {period_num}"] = {'present': present_sts, 'teacher_status': teacher_status}
+        save_to_disk()
+        msg = "تم تسجيل الحصة بنجاح!"
+
+    class_opts = "".join([f'<option value="{c}">{c}</option>' for c in sup_data.get('classes', [])])
+    period_opts = "".join([f'<option value="{k}">{v["label"]}</option>' for k, v in PERIODS_SCHEDULE.items()])
+
+    return render_template_string('''
+    <!DOCTYPE html>
+    <html lang="ar" dir="rtl">
+    <head>
+        <meta charset="UTF-8">
+        <title>لوحة الناظر</title>
+        <style>
+            body { font-family: system-ui, sans-serif; background: #f4f6f9; margin: 0; padding: 20px; }
+            .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); border-top: 4px solid #0d47a1; margin-top: 15px; }
+            select, input, button { width: 100%; padding: 10px; margin-top: 8px; box-sizing: border-box; }
+            button { background: #0d47a1; color: white; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; }
+            .nav-bar { background:#1565c0; padding:10px; border-radius:6px; margin-bottom:15px; display:flex; gap:10px; }
+            .nav-bar a { color:white; text-decoration:none; font-weight:bold; padding:6px 12px; background:#0d47a1; border-radius:4px; font-size:13px; }
+        </style>
+    </head>
+    <body>
+        <div style="background:#0d47a1; color:white; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; border-radius:8px;">
+            <h3 style="margin:0;">صفحة الناظر: {{ sup_name }}</h3>
+            <a href="/logout" style="color:white; background:#c62828; padding:6px 12px; border-radius:4px; text-decoration:none;">خروج</a>
+        </div>
+        <div class="nav-bar" style="margin-top:10px;">
+            <span style="color:white; font-weight:bold; align-self:center;">الانتقال:</span>
+            <a href="/teacher">👨‍🏫 واجهة الأستاذ</a>
+            {% if user_info.get('is_general_supervisor') or session.get('username') == 'admin' %}<a href="/general_supervisor">🏛️ الناظر العام</a>{% endif %}
+            {% if session.get('username') == 'admin' %}<a href="/admin" style="background:#2e7d32;">🏠 المدير</a>{% endif %}
+        </div>
+        {% if msg %}<div style="background:#e8f5e9; color:#2e7d32; padding:10px; border-radius:6px; margin-top:15px;">{{ msg }}</div>{% endif %}
+        <div class="card">
+            <h3 style="color:#0d47a1; margin-top:0;">📋 رصد الحصص</h3>
+            <form method="POST">
+                <input type="hidden" name="action" value="submit_supervisor_attendance">
+                <select name="period_num" required>{{ period_opts | safe }}</select>
+                <select name="class_name" required><option value="">-- اختر الصف --</option>{{ class_opts | safe }}</select>
+                <div style="margin-top:15px; background:#fff3e0; padding:15px; border-radius:6px;">
+                    <label style="font-weight:bold; color:#e65100;">لتزام الأستاذ:</label><br>
+                    <input type="radio" name="teacher_status" value="present" checked style="width:auto;"> ✅ حاضر<br>
+                    <input type="radio" name="teacher_status" value="absent" style="width:auto;"> ❌ متغيب<br>
+                    <input type="radio" name="teacher_status" value="escaped" style="width:auto;"> 🚨 تهرب ومغادرة
+                </div>
+                <button type="submit" style="margin-top:15px; background:#2e7d32;">حفظ التقرير</button>
+            </form>
+        </div>
+    </body>
+    </html>
+    ''', sup_name=sup_data.get('name'), class_opts=class_opts, period_opts=period_opts, user_info=user_info, msg=msg)
+
+@app.route('/teacher', methods=['GET', 'POST'])
+def teacher_dashboard():
+    if session.get('role') not in ['teacher', 'admin']: return redirect(url_for('login'))
+    username = session.get('username')
+    user_info = teachers_db.get(username, {})
+    return render_template_string('''
+    <!DOCTYPE html>
+    <html lang="ar" dir="rtl">
+    <head>
+        <meta charset="UTF-8">
+        <title>صفحة الأستاذ</title>
+        <style>
+            body { font-family: system-ui, sans-serif; background: #f4f6f9; margin: 0; padding: 20px; }
+            .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); border-top: 4px solid #0d47a1; margin-top: 15px; }
+            .nav-bar { background:#1565c0; padding:10px; border-radius:6px; margin-bottom:15px; display:flex; gap:10px; }
+            .nav-bar a { color:white; text-decoration:none; font-weight:bold; padding:6px 12px; background:#0d47a1; border-radius:4px; font-size:13px; }
+        </style>
+    </head>
+    <body>
+        <div style="background:#0d47a1; color:white; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; border-radius:8px;">
+            <h3 style="margin:0;">أهلاً بك الأستاذ: {{ user_info.get('name') }}</h3>
+            <a href="/logout" style="color:white; background:#c62828; padding:6px 12px; border-radius:4px; text-decoration:none;">خروج</a>
+        </div>
+        <div class="nav-bar" style="margin-top:10px;">
+            <span style="color:white; font-weight:bold; align-self:center;">الانتقال:</span>
+            {% if user_info.get('is_supervisor') or session.get('username') == 'admin' %}<a href="/supervisor">📋 ناظر الصفوف</a>{% endif %}
+            {% if user_info.get('is_general_supervisor') or session.get('username') == 'admin' %}<a href="/general_supervisor">🏛️ الناظر العام</a>{% endif %}
+            {% if session.get('username') == 'admin' %}<a href="/admin" style="background:#2e7d32;">🏠 المدير</a>{% endif %}
+        </div>
+        <div class="card">
+            <h3 style="color:#0d47a1; margin-top:0;">📚 واجهة تدريس المواد</h3>
+            <p>مرحباً بك. نظام حماية الجهاز مفعل؛ الحساب مرتبط بهاتفك الشخصي حصراً.</p>
+        </div>
+    </body>
+    </html>
+    ''', user_info=user_info)
 
 @app.route('/logout')
 def logout():
