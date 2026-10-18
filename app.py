@@ -4,9 +4,8 @@ import io
 import math
 import shutil
 import pandas as pd
-from datetime import datetime, time
-from flask import Flask, render_template_string, request, redirect, url_for, session, send_from_directory, send_file, jsonify
-from werkzeug.utils import secure_filename
+from datetime import datetime
+from flask import Flask, render_template_string, request, redirect, url_for, session, send_from_directory, jsonify
 
 app = Flask(__name__)
 app.secret_key = 'hermel_tech_school_shams_secret_key_2026'
@@ -44,12 +43,13 @@ students_db = []
 field_sessions = []
 teacher_absences_log = []
 
-# مخزن بيانات المديرية الأربعة
+# مخزن بيانات المديرية المحدث ليشمل ملف الساعات المنفذة
 directorate_excel_tables = {
     "students_registered": {"title": "الطلاب المسجلون", "columns": [], "data": []},
     "teachers_cards": {"title": "بطاقات الاساتذة", "columns": [], "data": []},
     "personal_info": {"title": "المعلومات الشخصية", "columns": [], "data": []},
-    "weekly_schedule": {"title": "برنامج اسبوعي مع الاساتذة والمواد", "columns": [], "data": [], "parsed_schedule": {}}
+    "weekly_schedule": {"title": "برنامج اسبوعي مع الاساتذة والمواد", "columns": [], "data": [], "parsed_schedule": {}},
+    "executed_hours": {"title": "الساعات المنفذة للاساتذة", "columns": [], "data": [], "monthly_hours": {}}
 }
 
 def calculate_distance(lat1, lon1, lat2, lon2):
@@ -116,8 +116,8 @@ if not load_from_disk():
         "سنة ثانية معلوماتية": ["محمد حسين أمهز", "سارة يوسف دندش"]
     }
     teachers_db = {
-        "teacher_1": {"name": "أحمد خضر", "password": "123", "subject": "تمريض", "device_id": "", "notifications": [], "monthly_data": {}, "contract_hours": 300, "schedule_pdf": None},
-        "teacher_2": {"name": "علي ناصرالدين", "password": "123", "subject": "معلوماتية", "device_id": "", "notifications": [], "monthly_data": {}, "contract_hours": 300, "schedule_pdf": None}
+        "teacher_1": {"name": "أحمد خضر", "password": "123", "subject": "تمريض", "device_id": "", "notifications": [], "monthly_hours": {}, "contract_hours": 300},
+        "teacher_2": {"name": "علي ناصرالدين", "password": "123", "subject": "معلوماتية", "device_id": "", "notifications": [], "monthly_hours": {}, "contract_hours": 300}
     }
     teacher_classes_map = {"teacher_1": ["سنة ثالثة عناية تمريضية"], "teacher_2": ["سنة ثانية معلوماتية"]}
     save_to_disk()
@@ -125,18 +125,14 @@ if not load_from_disk():
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# دالة تحليل البرنامج الأسبوعي واستخراج جدول كل أستاذ تلقائياً
 def parse_weekly_schedule(df):
     parsed_teachers = {}
     current_class = "عام"
-    
     for _, row in df.iterrows():
         first_col = str(row.iloc[0]).strip()
-        # التحقق إذا كان السطر يمثل ترويسة الصف والمستوى
         if "المستوى" in first_col or "الصف" in first_col:
             current_class = first_col
             continue
-            
         day_name = first_col
         if day_name in ["الاثنين", "الثلاثاء", "الاربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]:
             for col_idx in range(1, len(row)):
@@ -148,15 +144,10 @@ def parse_weekly_schedule(df):
                         teacher_name = parts[0].strip()
                         subject_name = parts[1].strip() if len(parts) > 1 else "مادة عامة"
                         period_num = f"حصة {col_idx}"
-                        
                         if teacher_name not in parsed_teachers:
                             parsed_teachers[teacher_name] = []
-                            
                         parsed_teachers[teacher_name].append({
-                            "day": day_name,
-                            "period": period_num,
-                            "class": current_class,
-                            "subject": subject_name
+                            "day": day_name, "period": period_num, "class": current_class, "subject": subject_name
                         })
     return parsed_teachers
 
@@ -189,9 +180,10 @@ HEADER_VTE_HTML = '''
     <div class="dropdown">
         <button class="dropbtn">الأساتذة والدوام ▾</button>
         <div class="dropdown-content">
-            <a href="javascript:void(0)" onclick="showSection('teachersListSec')">👨‍🏫 سجل الأساتذة والجدول</a>
+            <a href="javascript:void(0)" onclick="showSection('teachersListSec')">👨‍🏫 سجل الأساتذة وحسابات الدخول</a>
             <a href="javascript:void(0)" onclick="showSection('viewTeachersCards')">📇 بطاقات الاساتذة والمعلومات الشخصية</a>
             <a href="javascript:void(0)" onclick="showSection('viewWeeklySchedule')">📅 البرنامج الأسبوعي والأساتذة والمواد</a>
+            <a href="javascript:void(0)" onclick="showSection('viewExecutedHours')">⏱️ الساعات المنفذة شهرياً</a>
         </div>
     </div>
 
@@ -205,11 +197,11 @@ HEADER_VTE_HTML = '''
     <div class="dropdown">
         <button class="dropbtn">إعدادات وإدارة ▾</button>
         <div class="dropdown-content">
-            <a href="javascript:void(0)" onclick="showSection('uploadDirectorateFilesSec')">⚙️ رفع ملفات المديرية (Excel)</a>
+            <a href="javascript:void(0)" onclick="showSection('uploadDirectorateFilesSec')">⚙️ رفع ملفات المديرية والساعات (Excel)</a>
             <a href="javascript:void(0)" onclick="showSection('deviceBindingSec')">📱 إدارة أجهزة الأساتذة (فك الربط)</a>
             <a href="javascript:void(0)" onclick="showSection('sendNotifSec')">📢 إرسال تعميم / تنبيه</a>
             <a href="javascript:void(0)" onclick="showSection('teacherRepliesSec')">📩 الرسائل والأعذار الواردة</a>
-            <a href="javascript:void(0)" onclick="showSection('changePassSec')">🔑 تغيير كلمة السر</a>
+            <a href="javascript:void(0)" onclick="showSection('changePassSec')">🔑 تغيير كلمة السر الإدارية</a>
         </div>
     </div>
 </div>
@@ -244,7 +236,7 @@ def login():
                 t_data['device_id'] = current_device_fingerprint
                 save_to_disk()
             elif t_data.get('device_id') != current_device_fingerprint:
-                error = 'عذراً، هذا الحساب مرتبط بهاتف آخر. يراجع مدير المعهد لإعادة ضبط الجهاز.'
+                error = 'عذراً! هذا الحساب مرتبط بهاتف أستاذ آخر. يرجى التواصل مع مدير المعهد لإعادة تعيين الجهاز.'
                 return render_template_string(login_template, error=error)
 
             session['username'] = username
@@ -354,17 +346,40 @@ def admin_dashboard():
                         "students_registered": "الطلاب المسجلون",
                         "teachers_cards": "بطاقات الاساتذة",
                         "personal_info": "المعلومات الشخصية",
-                        "weekly_schedule": "برنامج اسبوعي مع الاساتذة والمواد"
+                        "weekly_schedule": "برنامج اسبوعي مع الاساتذة والمواد",
+                        "executed_hours": "الساعات المنفذة للاساتذة"
                     }
                     
                     table_title = title_map.get(file_key, "ملف المديرية")
+                    
+                    if file_key == 'executed_hours':
+                        monthly_map = {}
+                        for r in rows_data:
+                            t_name = r.get('الاسم الثلاثي', r.get('اسم الاستاذ', '')).strip()
+                            if t_name:
+                                if t_name not in monthly_map:
+                                    monthly_map[t_name] = {}
+                                for col in columns:
+                                    if col not in ['الاسم الثلاثي', 'اسم المعهد', 'رقم المعهد', 'الرقم المالي', '(10)لم يقبض omt']:
+                                        try:
+                                            hrs = float(r.get(col, 0) or 0)
+                                            monthly_map[t_name][col] = hrs
+                                        except:
+                                            pass
+                        directorate_excel_tables['executed_hours']['monthly_hours'] = monthly_map
+                        
+                        for u, t_info in teachers_db.items():
+                            t_real_name = t_info['name'].strip()
+                            if t_real_name in monthly_map:
+                                t_info['monthly_hours'] = monthly_map[t_real_name]
+
                     directorate_excel_tables[file_key] = {
                         "title": table_title,
                         "columns": columns,
-                        "data": rows_data
+                        "data": rows_data,
+                        "monthly_hours": directorate_excel_tables.get('executed_hours', {}).get('monthly_hours', {})
                     }
                     
-                    # إذا كان الملف المرفوع هو البرنامج الأسبوعي، نقوم بتحليله واستخراج جدول الحصص لكل أستاذ
                     if file_key == 'weekly_schedule':
                         parsed = parse_weekly_schedule(df)
                         directorate_excel_tables['weekly_schedule']['parsed_schedule'] = parsed
@@ -374,7 +389,6 @@ def admin_dashboard():
                         for r in rows_data:
                             c_name = r.get('الصف', r.get('Class', r.get('التخصص', 'غير مصنف')))
                             s_name = r.get('اسم الطالب الكامل', r.get('اسم الطالب', r.get('الاسم الثلاثي', r.get('الاسم', ''))))
-                            
                             if c_name and s_name and str(c_name) != 'nan' and str(s_name) != 'nan':
                                 if c_name not in new_classes:
                                     new_classes[c_name] = []
@@ -384,18 +398,39 @@ def admin_dashboard():
                             classes_students.update(new_classes)
 
                     save_to_disk()
-                    msg = f"تم رفع وتحديث ملف ({table_title}) وقراءة الداتا بنجاح بدون أخطاء!"
+                    msg = f"تم رفع وتحديث ملف ({table_title}) وقراءة الساعات والداتا بنجاح!"
                 except Exception as e:
                     msg = f"خطأ في قراءة ملف الإكسل: {e}"
             else:
                 msg = "الرجاء اختيار ملف صالح وتحديد نوع جدول المديرية بدقة."
+
+        elif action == 'create_auto_accounts':
+            t_cards = directorate_excel_tables.get('teachers_cards', {}).get('data', [])
+            count = 0
+            for card in t_cards:
+                name = card.get('الاسم الثلاثي', card.get('الاسم', '')).strip()
+                if name:
+                    user_id = f"teacher_{len(teachers_db) + 1}"
+                    if not any(t['name'] == name for t in teachers_db.values()):
+                        teachers_db[user_id] = {
+                            "name": name,
+                            "password": "123",
+                            "subject": card.get('المادة', 'عام'),
+                            "device_id": "",
+                            "notifications": [],
+                            "monthly_hours": {},
+                            "contract_hours": 300
+                        }
+                        count += 1
+            save_to_disk()
+            msg = f"تم توليد ({count}) حساب جديد للأساتذة بكلمة سر افتراضية (123)!"
 
         elif action == 'reset_teacher_device':
             target_user = request.form.get('target_user')
             if target_user in teachers_db:
                 teachers_db[target_user]['device_id'] = ''
                 save_to_disk()
-                msg = f"تم مسح بصمة الجهاز للأستاذ ({teachers_db[target_user]['name']}) بنجاح!"
+                msg = f"تم مسح بصمة الجهاز وإعادة تعيين الهوية للأستاذ ({teachers_db[target_user]['name']}) بنجاح!"
 
         elif action == 'send_notification':
             target_user = request.form.get('target_user')
@@ -418,7 +453,20 @@ def admin_dashboard():
 
     attendance_rows = "".join([f"<tr><td><b>{k}</b></td><td style='color:#c62828;'>متغيبون: {v.get('absent', [])}</td></tr>" for k, v in attendance_db.items()])
     grades_rows = "".join([f"<tr><td><b>{k}</b></td><td><b style='color:#0d47a1;'>{v} / 20</b></td></tr>" for k, v in grades_db.items()])
-    teachers_rows = "".join([f"<tr><td><b>{t['name']}</b><br><small>{t['subject']}</small></td><td>{t['contract_hours']} ساعة</td></tr>" for u, t in teachers_db.items()])
+    
+    teachers_rows = ""
+    for u, t in teachers_db.items():
+        dev_stat = "<span style='color:#2e7d32; font-weight:bold;'>مرتبط برقم هاتف</span>" if t.get('device_id') else "<span style='color:#e65100;'>في انتظار تسجيل الهاتف</span>"
+        total_hrs = sum(t.get('monthly_hours', {}).values())
+        teachers_rows += f"""
+        <tr>
+            <td><b>{t['name']}</b></td>
+            <td><code style='color:#0d47a1;'>{u}</code></td>
+            <td><code>{t['password']}</code></td>
+            <td>{dev_stat}</td>
+            <td><b style='color:#2e7d32;'>{total_hrs} ساعة</b></td>
+        </tr>
+        """
     
     field_rows = ""
     for fs in reversed(field_sessions):
@@ -521,10 +569,19 @@ def admin_dashboard():
                 {{ directorate_htmls['weekly_schedule'] | safe }}
             </div>
 
+            <div id="viewExecutedHours" class="card">
+                <h3 style="color:#0d47a1; margin-top:0;">⏱️ الساعات المنفذة شهرياً</h3>
+                {{ directorate_htmls['executed_hours'] | safe }}
+            </div>
+
             <div id="teachersListSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">👨‍🏫 سجل الأساتذة والجدول</h3>
+                <h3 style="color:#0d47a1; margin-top:0;">👨‍🏫 سجل الأساتذة وحسابات الدخول والبصمة</h3>
+                <form method="POST" style="margin-bottom:15px;">
+                    <input type="hidden" name="action" value="create_auto_accounts">
+                    <button type="submit" style="background:#2e7d32;">⚡ توليد يوزر وباسورد افتراضي لجميع الأساتذة تلقائياً</button>
+                </form>
                 <table>
-                    <tr><th>اسم الأستاذ والمادة</th><th>عقد الساعات</th></tr>
+                    <tr><th>اسم الأستاذ</th><th>اسم المستخدم</th><th>كلمة المرور</th><th>حالة الهاتف</th><th>مجموع الساعات المنفذة</th></tr>
                     {{ teachers_rows | safe }}
                 </table>
             </div>
@@ -550,31 +607,33 @@ def admin_dashboard():
             </div>
 
             <div id="uploadDirectorateFilesSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">⚙️ رفع ملفات المديرية الأربعة (Excel)</h3>
+                <h3 style="color:#0d47a1; margin-top:0;">⚙️ رفع ملفات المديرية والساعات المنفذة (Excel)</h3>
                 <form method="POST" enctype="multipart/form-data">
                     <input type="hidden" name="action" value="upload_directorate_file">
                     
-                    <label><b>حدد الملف المراد رفعه من القائمة المنسدلة:</b></label>
+                    <label><b>حدد نوع الملف المراد رفعه:</b></label>
                     <select name="file_key" required style="font-weight:bold; background:#e3f2fd;">
                         <option value="students_registered">📂 1. الطلاب المسجلون</option>
                         <option value="teachers_cards">📇 2. بطاقات الاساتذة</option>
                         <option value="personal_info">👤 3. المعلومات الشخصية</option>
                         <option value="weekly_schedule">📅 4. البرنامج الأسبوعي مع الاساتذة والمواد</option>
+                        <option value="executed_hours">⏱️ 5. الساعات المنفذة للاساتذة (جديد)</option>
                     </select>
 
                     <label style="margin-top:12px; display:block;"><b>اختر ملف الإكسل (.xlsx أو .xls):</b></label>
                     <input type="file" name="excel_file" accept=".xlsx, .xls" required>
                     
-                    <button type="submit" style="margin-top:15px; background:#2e7d32; font-size:15px;">📥 رفع واستقبال الداتا فوراً وتحديث النظام</button>
+                    <button type="submit" style="margin-top:15px; background:#2e7d32; font-size:15px;">📥 رفع وتحديث الساعات والداتا فوراً</button>
                 </form>
             </div>
 
             <div id="deviceBindingSec" class="card">
-                <h3 style="color:#c62828; margin-top:0;">📱 إدارة أجهزة الأساتذة (فك ربط الجهاز)</h3>
+                <h3 style="color:#c62828; margin-top:0;">📱 إدارة أجهزة الأساتذة (إعادة تعيين الجهاز بنقرة زر)</h3>
                 <form method="POST">
                     <input type="hidden" name="action" value="reset_teacher_device">
+                    <label>اختر الأستاذ لإعادة تعيين هاتفه الحسابي:</label>
                     <select name="target_user" required><option value="">-- اختر الأستاذ --</option>{{ teacher_opts | safe }}</select>
-                    <button type="submit" style="margin-top:10px; background:#c62828;">🔓 السماح بتسجيل هاتف جديد للأستاذ</button>
+                    <button type="submit" style="margin-top:10px; background:#c62828;">🔓 مسح البصمة والسماح بتسجيل هاتف جديد للأستاذ</button>
                 </form>
             </div>
 
@@ -627,7 +686,14 @@ def teacher_dashboard():
     if request.method == 'POST':
         action = request.form.get('action')
         
-        if action == 'submit_class_grades':
+        if action == 'change_my_password':
+            new_p = request.form.get('new_password', '').strip()
+            if new_p:
+                user_data['password'] = new_p
+                save_to_disk()
+                msg = "تم تغيير كلمة المرور الخاصة بك بنجاح!"
+
+        elif action == 'submit_class_grades':
             class_name = request.form.get('class_name')
             subject = user_data.get('subject', 'عام')
             students = classes_students.get(class_name, [])
@@ -658,15 +724,27 @@ def teacher_dashboard():
     class_opts = "".join([f'<option value="{c}">{c}</option>' for c in my_classes])
     notifs = "".join([f"<div style='background:#e3f2fd; padding:8px; margin-bottom:5px; border-radius:4px; font-weight:bold;'>🔔 {n}</div>" for n in user_data.get('notifications', [])])
 
-    # استخراج برنامج الأستاذ الشخصي من جدول البرنامج الأسبوعي المرفوع
+    monthly_hrs = user_data.get('monthly_hours', {})
+    hrs_html = ""
+    if monthly_hrs:
+        hrs_tr = "".join([f"<tr><td>الشهر ({m})</td><td><b>{h} ساعة</b></td></tr>" for m, h in monthly_hrs.items()])
+        total_h = sum(monthly_hrs.values())
+        hrs_html = f"""
+        <div class="card" style="border-top:4px solid #1565c0;">
+            <h4 style="color:#0d47a1; margin-top:0;">⏱️ سجل الساعات المنفذة لي شهرياً:</h4>
+            <table>
+                <tr><th>الشهر</th><th>عدد الساعات المنفذة</th></tr>
+                {hrs_tr}
+                <tr style="background:#e3f2fd;"><td><b>المجموع الكلي للساعات المنفذة:</b></td><td><b style="color:#2e7d32; font-size:15px;">{total_h} ساعة</b></td></tr>
+            </table>
+        </div>
+        """
+
     parsed_schedule = directorate_excel_tables.get('weekly_schedule', {}).get('parsed_schedule', {})
     teacher_schedule_items = parsed_schedule.get(t_name, [])
-    
     schedule_html = ""
     if teacher_schedule_items:
-        schedule_rows = ""
-        for item in teacher_schedule_items:
-            schedule_rows += f"<tr><td><b>{item['day']}</b></td><td>{item['period']}</td><td>{item['class']}</td><td><b style='color:#0d47a1;'>{item['subject']}</b></td></tr>"
+        schedule_rows = "".join([f"<tr><td><b>{item['day']}</b></td><td>{item['period']}</td><td>{item['class']}</td><td><b style='color:#0d47a1;'>{item['subject']}</b></td></tr>" for item in teacher_schedule_items])
         schedule_html = f"""
         <div class="card" style="border-top:4px solid #2e7d32;">
             <h4 style="color:#2e7d32; margin-top:0;">📅 برنامجي الأسبوعي (المستخرج من جدول المديرية):</h4>
@@ -676,8 +754,6 @@ def teacher_dashboard():
             </table>
         </div>
         """
-    else:
-        schedule_html = '<div class="card"><p style="color:#666;">لا يوجد برنامج أسبوعي مسجل باسمك حالياً أو لم يتم رفع ملف البرنامج بعد.</p></div>'
 
     my_sessions = [s for s in field_sessions if s['primary_teacher'] == t_name or s['secondary_teacher'] == t_name]
     field_html = ""
@@ -718,9 +794,20 @@ def teacher_dashboard():
         <div style="padding:15px;">
             {% if msg %}<div style="background:#e8f5e9; color:#2e7d32; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold;">{{ msg }}</div>{% endif %}
 
+            {{ hrs_html | safe }}
+
             {{ schedule_html | safe }}
 
             {{ field_html | safe }}
+
+            <div class="card">
+                <h4 style="color:#0d47a1; margin-top:0;">🔑 تغيير كلمة المرور الخاصة بي:</h4>
+                <form method="POST">
+                    <input type="hidden" name="action" value="change_my_password">
+                    <input type="password" name="new_password" placeholder="أدخل كلمة المرور الجديدة..." required>
+                    <button type="submit" style="background:#1565c0; margin-top:8px;">تحديث كلمة المرور</button>
+                </form>
+            </div>
 
             <div class="card">
                 <h4 style="color:#0d47a1; margin-top:0;">📢 التعاميم الواردة:</h4>
@@ -809,21 +896,10 @@ def teacher_dashboard():
     </body>
     </html>
     """
-    return render_template_string(teacher_template, t_name=t_name, msg=msg, class_opts=class_opts, notifs=notifs, schedule_html=schedule_html, field_html=field_html)
+    return render_template_string(teacher_template, t_name=t_name, msg=msg, class_opts=class_opts, notifs=notifs, hrs_html=hrs_html, schedule_html=schedule_html, field_html=field_html)
 
 @app.route('/teacher/submit_field_attendance', methods=['POST'])
-def submit_field_attendance(request=None):
-    if session.get('role') != 'teacher': return jsonify({"success": False, "message": "غير مصرح"}), 403
-    data = request.json if request else flask_request_json()
-    # ... بقية دالة الـ GPS الأساسية ...
-    return jsonify({"success": True, "message": "تم التحقق الجغرافي بالـ GPS بنجاح!"})
-
-# دالة مساعدة لتجنب أخطاء الـ Request في الـ GPS
-def flask_request_json():
-    return request.json
-
-@app.route('/teacher/submit_field_attendance', methods=['POST'])
-def submit_field_attendance_main():
+def submit_field_attendance():
     if session.get('role') != 'teacher': return jsonify({"success": False, "message": "غير مصرح"}), 403
     data = request.json
     s_id = int(data.get('session_id'))
@@ -851,7 +927,7 @@ def uploaded_file(filename):
 @app.route('/logout')
 def logout():
     session.clear()
-    return redirect(url_for('login'))
+    return redirect(url_for('logout'))
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
