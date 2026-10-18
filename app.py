@@ -1006,7 +1006,6 @@ def submit_field_attendance():
         return jsonify({"success": True, "message": "تم التحقق الجغرافي بالـ GPS بنجاح وتوثيق حضورك!"})
     return jsonify({"success": False, "message": "الجلسة غير متوفرة"}), 400
 
-@app.uploads('/uploads/<filename>')
 @app.route('/uploads/<filename>')
 def uploaded_file(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
