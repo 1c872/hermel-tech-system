@@ -44,6 +44,14 @@ students_db = []
 field_sessions = []
 teacher_absences_log = []
 
+# إضافة: مخزن بيانات ملفات المديرية الأربعة
+directorate_excel_tables = {
+    "students_registered": {"title": "الطلاب المسجلون", "columns": [], "data": []},
+    "teachers_cards": {"title": "بطاقات الاساتذة", "columns": [], "data": []},
+    "personal_info": {"title": "المعلومات الشخصية", "columns": [], "data": []},
+    "weekly_schedule": {"title": "برنامج اسبوعي مع الاساتذة والمواد", "columns": [], "data": []}
+}
+
 def calculate_distance(lat1, lon1, lat2, lon2):
     R = 6371000
     phi1 = math.radians(lat1)
@@ -68,7 +76,8 @@ def save_to_disk():
             'current_academic_year': current_academic_year,
             'students_db': students_db,
             'field_sessions': field_sessions,
-            'teacher_absences_log': teacher_absences_log
+            'teacher_absences_log': teacher_absences_log,
+            'directorate_excel_tables': directorate_excel_tables
         }
         with open(DB_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -78,7 +87,7 @@ def save_to_disk():
 
 def load_from_disk():
     global teachers_db, grades_db, attendance_db, teacher_classes_map, admin_replies, admin_credentials, classes_students
-    global academic_years_db, current_academic_year, students_db, field_sessions, teacher_absences_log
+    global academic_years_db, current_academic_year, students_db, field_sessions, teacher_absences_log, directorate_excel_tables
     if os.path.exists(DB_FILE):
         try:
             with open(DB_FILE, 'r', encoding='utf-8') as f:
@@ -95,6 +104,7 @@ def load_from_disk():
                 students_db = data.get('students_db', [])
                 field_sessions = data.get('field_sessions', [])
                 teacher_absences_log = data.get('teacher_absences_log', [])
+                directorate_excel_tables = data.get('directorate_excel_tables', directorate_excel_tables)
                 return True
         except Exception as e:
             print(f"Error loading database file: {e}")
@@ -137,6 +147,7 @@ HEADER_VTE_HTML = '''
         <div class="dropdown-content">
             <a href="javascript:void(0)" onclick="showSection('studentAttendanceSec')">📋 حضور وغياب الطلاب</a>
             <a href="javascript:void(0)" onclick="showSection('studentGradesSec')">📝 علامات ونتائج الطلاب</a>
+            <a href="javascript:void(0)" onclick="showSection('viewRegisteredStudents')">📂 جدول الطلاب المسجلون</a>
         </div>
     </div>
 
@@ -144,6 +155,8 @@ HEADER_VTE_HTML = '''
         <button class="dropbtn">الأساتذة والدوام ▾</button>
         <div class="dropdown-content">
             <a href="javascript:void(0)" onclick="showSection('teachersListSec')">👨‍🏫 سجل الأساتذة والجدول</a>
+            <a href="javascript:void(0)" onclick="showSection('viewTeachersCards')">📇 بطاقات الاساتذة والمعلومات الشخصية</a>
+            <a href="javascript:void(0)" onclick="showSection('viewWeeklySchedule')">📅 البرنامج الأسبوعي والأساتذة والمواد</a>
         </div>
     </div>
 
@@ -157,7 +170,7 @@ HEADER_VTE_HTML = '''
     <div class="dropdown">
         <button class="dropbtn">إعدادات وإدارة ▾</button>
         <div class="dropdown-content">
-            <a href="javascript:void(0)" onclick="showSection('uploadStudentsSec')">👨‍🎓 رفع ملف الطلاب (Excel)</a>
+            <a href="javascript:void(0)" onclick="showSection('uploadDirectorateFilesSec')">⚙️ رفع ملفات المديرية (Excel)</a>
             <a href="javascript:void(0)" onclick="showSection('deviceBindingSec')">📱 إدارة أجهزة الأساتذة (فك الربط)</a>
             <a href="javascript:void(0)" onclick="showSection('sendNotifSec')">📢 إرسال تعميم / تنبيه</a>
             <a href="javascript:void(0)" onclick="showSection('teacherRepliesSec')">📩 الرسائل والأعذار الواردة</a>
@@ -170,7 +183,7 @@ HEADER_VTE_HTML = '''
     .dropdown { position: relative; display: inline-block; }
     .dropbtn { background-color: #1565c0; color: white; padding: 12px 16px; font-size: 14px; border: none; cursor: pointer; font-weight: bold; font-family: inherit; }
     .dropdown:hover .dropbtn { background-color: #0d47a1; }
-    .dropdown-content { display: none; position: absolute; background-color: #ffffff; min-width: 230px; box-shadow: 0px 8px 16px rgba(0,0,0,0.2); z-index: 100; border-radius: 0 0 6px 6px; }
+    .dropdown-content { display: none; position: absolute; background-color: #ffffff; min-width: 250px; box-shadow: 0px 8px 16px rgba(0,0,0,0.2); z-index: 100; border-radius: 0 0 6px 6px; }
     .dropdown-content a { color: #333; padding: 10px 15px; text-decoration: none; display: block; font-size: 13.5px; border-bottom: 1px solid #f0f0f0; }
     .dropdown-content a:hover { background-color: #e3f2fd; color: #0d47a1; font-weight: bold; }
     .dropdown:hover .dropdown-content { display: block; }
@@ -284,26 +297,55 @@ def admin_dashboard():
     if request.method == 'POST':
         action = request.form.get('action')
         
-        if action == 'upload_students':
+        if action == 'upload_directorate_file':
+            file_key = request.form.get('file_key')
             file = request.files.get('excel_file')
-            if file and allowed_file(file.filename):
+            
+            if file and allowed_file(file.filename) and file_key in directorate_excel_tables:
                 try:
                     df = pd.read_excel(file)
-                    new_classes = {}
+                    columns = [str(col).strip() for col in df.columns.tolist()]
+                    rows_data = []
                     for _, row in df.iterrows():
-                        c_name = str(row.get('الصف', row.get('Class', ''))).strip()
-                        s_name = str(row.get('اسم الطالب', row.get('Student', ''))).strip()
-                        if c_name and s_name and c_name != 'nan':
-                            if c_name not in new_classes:
-                                new_classes[c_name] = []
-                            if s_name not in new_classes[c_name]:
-                                new_classes[c_name].append(s_name)
-                    if new_classes:
-                        classes_students.update(new_classes)
-                        save_to_disk()
-                        msg = "تم استيراد الطلاب والصفوف بنجاح!"
+                        row_dict = {}
+                        for col in columns:
+                            val = row[col]
+                            row_dict[col] = "" if pd.isna(val) else str(val).strip()
+                        rows_data.append(row_dict)
+                    
+                    title_map = {
+                        "students_registered": "الطلاب المسجلون",
+                        "teachers_cards": "بطاقات الاساتذة",
+                        "personal_info": "المعلومات الشخصية",
+                        "weekly_schedule": "برنامج اسبوعي مع الاساتذة والمواد"
+                    }
+                    
+                    table_title = title_map.get(file_key, "ملف المديرية")
+                    directorate_excel_tables[file_key] = {
+                        "title": table_title,
+                        "columns": columns,
+                        "data": rows_data
+                    }
+                    
+                    if file_key == 'students_registered':
+                        new_classes = {}
+                        for r in rows_data:
+                            c_name = r.get('الصف', r.get('Class', r.get('التخصص', 'غير مصنف')))
+                            s_name = r.get('اسم الطالب', r.get('Student', r.get('الاسم', r.get('الاسم الثلاثي', ''))))
+                            if c_name and s_name:
+                                if c_name not in new_classes:
+                                    new_classes[c_name] = []
+                                if s_name not in new_classes[c_name]:
+                                    new_classes[c_name].append(s_name)
+                        if new_classes:
+                            classes_students.update(new_classes)
+
+                    save_to_disk()
+                    msg = f"تم رفع وتحديث ملف ({table_title}) واستخراج بيانات المديرية بنجاح!"
                 except Exception as e:
                     msg = f"خطأ في قراءة ملف الإكسل: {e}"
+            else:
+                msg = "الرجاء اختيار ملف صالح وتحديد نوع جدول المديرية بدقة."
 
         elif action == 'reset_teacher_device':
             target_user = request.form.get('target_user')
@@ -350,6 +392,32 @@ def admin_dashboard():
         </div>
         """
 
+    directorate_htmls = {}
+    for k, tinfo in directorate_excel_tables.items():
+        cols = tinfo['columns']
+        rows = tinfo['data']
+        headers_th = "".join([f"<th>{c}</th>" for c in cols]) if cols else "<th>لا توجد أعمدة</th>"
+        body_tr = ""
+        if rows:
+            for r in rows[:100]:
+                tds = "".join([f"<td>{r.get(c, '')}</td>" for c in cols])
+                body_tr += f"<tr>{tds}</tr>"
+        else:
+            body_tr = f"<tr><td colspan='{len(cols) or 1}'>لم يتم رفع بيانات لهذا الملف بعد</td></tr>"
+
+        directorate_htmls[k] = f"""
+        <div style="background:white; border:1px solid #bbdefb; border-radius:8px; padding:15px; margin-bottom:20px; box-shadow:0 2px 5px rgba(0,0,0,0.05);">
+            <h4 style="color:#0d47a1; margin-top:0; border-bottom:2px solid #e3f2fd; padding-bottom:8px;">📂 جدول مديرية التعليم المهني: {tinfo['title']}</h4>
+            <div style="overflow-x:auto;">
+                <table>
+                    <tr>{headers_th}</tr>
+                    {body_tr}
+                </table>
+            </div>
+            <small style="color:#555; display:block; margin-top:8px;">إجمالي السجلات: <b>{len(rows)}</b> سجل | الأعمدة المستخرجة: <b>{len(cols)}</b> عمود</small>
+        </div>
+        """
+
     teacher_opts = "".join([f"<option value='{u}'>{t['name']} ({u})</option>" for u, t in teachers_db.items()])
     locations_opts = "".join([f"<option value='{loc}'>{loc}</option>" for loc in TRAINING_LOCATIONS.keys()])
 
@@ -393,6 +461,23 @@ def admin_dashboard():
                 </table>
             </div>
 
+            <div id="viewRegisteredStudents" class="card">
+                <h3 style="color:#0d47a1; margin-top:0;">📂 الطلاب المسجلون (بيانات المديرية)</h3>
+                {{ directorate_htmls['students_registered'] | safe }}
+            </div>
+
+            <div id="viewTeachersCards" class="card">
+                <h3 style="color:#0d47a1; margin-top:0;">📇 بطاقات الاساتذة والمعلومات الشخصية</h3>
+                {{ directorate_htmls['teachers_cards'] | safe }}
+                <div style="margin-top:15px;"></div>
+                {{ directorate_htmls['personal_info'] | safe }}
+            </div>
+
+            <div id="viewWeeklySchedule" class="card">
+                <h3 style="color:#0d47a1; margin-top:0;">📅 البرنامج الأسبوعي مع الأساتذة والمواد</h3>
+                {{ directorate_htmls['weekly_schedule'] | safe }}
+            </div>
+
             <div id="teachersListSec" class="card">
                 <h3 style="color:#0d47a1; margin-top:0;">👨‍🏫 سجل الأساتذة والجدول</h3>
                 <table>
@@ -421,12 +506,23 @@ def admin_dashboard():
                 </table>
             </div>
 
-            <div id="uploadStudentsSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">👨‍🎓 رفع ملف الطلاب والصفوف (Excel)</h3>
+            <div id="uploadDirectorateFilesSec" class="card">
+                <h3 style="color:#0d47a1; margin-top:0;">⚙️ رفع ملفات المديرية الأربعة (Excel)</h3>
                 <form method="POST" enctype="multipart/form-data">
-                    <input type="hidden" name="action" value="upload_students">
+                    <input type="hidden" name="action" value="upload_directorate_file">
+                    
+                    <label><b>حدد الملف المراد رفعه من القائمة المنسدلة:</b></label>
+                    <select name="file_key" required style="font-weight:bold; background:#e3f2fd;">
+                        <option value="students_registered">📂 1. الطلاب المسجلون</option>
+                        <option value="teachers_cards">📇 2. بطاقات الاساتذة</option>
+                        <option value="personal_info">👤 3. المعلومات الشخصية</option>
+                        <option value="weekly_schedule">📅 4. البرنامج الأسبوعي مع الاساتذة والمواد</option>
+                    </select>
+
+                    <label style="margin-top:12px; display:block;"><b>اختر ملف الإكسل (.xlsx أو .xls):</b></label>
                     <input type="file" name="excel_file" accept=".xlsx, .xls" required>
-                    <button type="submit" style="margin-top:10px; background:#2e7d32;">رفع واستيراد الطلاب</button>
+                    
+                    <button type="submit" style="margin-top:15px; background:#2e7d32; font-size:15px;">📥 رفع واستقبال الداتا فوراً وتحديث النظام</button>
                 </form>
             </div>
 
@@ -474,7 +570,7 @@ def admin_dashboard():
     </body>
     </html>
     '''
-    return render_template_string(admin_template, attendance_rows=attendance_rows, grades_rows=grades_rows, teachers_rows=teachers_rows, field_rows=field_rows, replies_html=replies_html, teacher_opts=teacher_opts, locations_opts=locations_opts, msg=msg)
+    return render_template_string(admin_template, attendance_rows=attendance_rows, grades_rows=grades_rows, teachers_rows=teachers_rows, field_rows=field_rows, replies_html=replies_html, teacher_opts=teacher_opts, locations_opts=locations_opts, directorate_htmls=directorate_htmls, msg=msg)
 
 @app.route('/teacher', methods=['GET', 'POST'])
 def teacher_dashboard():
