@@ -3,6 +3,7 @@ import json
 import io
 import math
 import shutil
+import re
 import pandas as pd
 from datetime import datetime
 from flask import Flask, render_template_string, request, redirect, url_for, session, send_from_directory, jsonify
@@ -52,6 +53,14 @@ directorate_excel_tables = {
     "weekly_schedule": {"title": "برنامج اسبوعي مع الاساتذة والمواد", "columns": [], "data": [], "parsed_schedule": {}},
     "executed_hours": {"title": "الساعات المنفذة للاساتذة", "columns": [], "data": [], "monthly_hours": {}}
 }
+
+def clean_column_name(col):
+    col_str = str(col).strip()
+    col_str = col_str.replace("&#x27;", "").replace("'", "").replace('"', '')
+    col_str = re.sub(r'^ش\s*', '', col_str) # إزالة كلمة "ش" إن وجدت
+    if len(col_str) == 1 and col_str.isdigit():
+        col_str = '0' + col_str
+    return col_str
 
 def calculate_distance(lat1, lon1, lat2, lon2):
     R = 6371000
@@ -332,14 +341,21 @@ def admin_dashboard():
             if file and allowed_file(file.filename) and file_key in directorate_excel_tables:
                 try:
                     df = pd.read_excel(file)
-                    clean_cols = [str(col).strip().replace("'", "").replace('"', '') for col in df.columns]
-                    df.columns = clean_cols
-                    columns = clean_cols
+                    
+                    # إنشاء خريطة تنظيف الأعمدة للتعامل مع أسماء المديرية المتنوعة
+                    col_mapping = {}
+                    clean_columns = []
+                    for original_col in df.columns:
+                        c_cleaned = clean_column_name(original_col)
+                        col_mapping[original_col] = c_cleaned
+                        clean_columns.append(c_cleaned)
+                    
+                    df_renamed = df.rename(columns=col_mapping)
                     
                     rows_data = []
-                    for _, row in df.iterrows():
+                    for _, row in df_renamed.iterrows():
                         row_dict = {}
-                        for col in columns:
+                        for col in df_renamed.columns:
                             val = row[col]
                             row_dict[col] = "" if pd.isna(val) else str(val).strip()
                         rows_data.append(row_dict)
@@ -370,13 +386,20 @@ def admin_dashboard():
                                 except:
                                     contract_map[t_name] = 300
                                 
+                                # قراءة الساعات الشهرية بدقة مع دعم كافة التسميات والتشفيص
                                 for m_col in MONTH_COLUMNS:
-                                    if m_col in r:
+                                    found_val = None
+                                    for key, val in r.items():
+                                        if clean_column_name(key) == m_col:
+                                            found_val = val
+                                            break
+                                    if found_val is not None:
                                         try:
-                                            val_num = float(r.get(m_col, 0) or 0)
-                                            monthly_map[t_name][m_col] = val_num
+                                            monthly_map[t_name][m_col] = float(found_val or 0)
                                         except:
                                             monthly_map[t_name][m_col] = 0.0
+                                    else:
+                                        monthly_map[t_name][m_col] = 0.0
                         
                         directorate_excel_tables['executed_hours']['monthly_hours'] = monthly_map
                         
@@ -389,7 +412,7 @@ def admin_dashboard():
 
                     directorate_excel_tables[file_key] = {
                         "title": table_title,
-                        "columns": columns,
+                        "columns": clean_columns,
                         "data": rows_data,
                         "monthly_hours": directorate_excel_tables.get('executed_hours', {}).get('monthly_hours', {})
                     }
@@ -412,7 +435,7 @@ def admin_dashboard():
                             classes_students.update(new_classes)
 
                     save_to_disk()
-                    msg = f"تم رفع وتحديث ملف ({table_title}) بقراءة مجدولة على طريقة المديرية بنجاح!"
+                    msg = f"تم رفع وتحديث ملف ({table_title}) وقراءة الساعات المنفذة بنجاح!"
                 except Exception as e:
                     msg = f"خطأ في قراءة ملف الإكسل: {e}"
             else:
