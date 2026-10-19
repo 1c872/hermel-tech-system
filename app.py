@@ -134,12 +134,9 @@ def allowed_file(filename):
 def parse_teachers_and_subjects(df):
     parsed_teachers = {}
     for _, row in df.iterrows():
-        # البحث عن الأعمدة بغض النظر عن المسافات أو التسميات الدقيقة
-        row_vals = [str(val).strip() for val in row.values if pd.notna(val)]
-        if len(row_vals) < 3:
-            continue
-            
         teacher_name, class_name, subject_name, sub_type = "", "", "", "نظري"
+        
+        # البحث بذكاء داخل الأعمدة
         for col in df.columns:
             col_str = str(col).strip()
             val_str = str(row[col]).strip() if pd.notna(row[col]) else ""
@@ -152,7 +149,7 @@ def parse_teachers_and_subjects(df):
             elif "نظري" in col_str or "تطبيقي" in col_str or "نوع" in col_str:
                 sub_type = val_str
 
-        # إذا لم يتم التعرف بالأسماء، نأخذ الترتيب الافتراضي (العمود 0: أستاذ، العمود 1: صف، العمود 2: مادة، العمود 3: نوع)
+        # اعتماد الترتيب الافتراضي للأعمدة إذا لم تود العناوين الصريحة
         if not teacher_name and len(row) > 0 and pd.notna(row.iloc[0]):
             teacher_name = str(row.iloc[0]).strip()
         if not class_name and len(row) > 1 and pd.notna(row.iloc[1]):
@@ -164,7 +161,7 @@ def parse_teachers_and_subjects(df):
 
         if teacher_name and teacher_name != "nan" and subject_name and subject_name != "nan" and class_name and class_name != "nan":
             norm_t = normalize_name(teacher_name)
-            if norm_t and len(norm_t) > 2:
+            if norm_t and len(norm_t) > 1:
                 if norm_t not in parsed_teachers:
                     parsed_teachers[norm_t] = []
                 
@@ -714,7 +711,7 @@ def admin_dashboard():
             norm_t = normalize_name(t_info['name'])
             items = []
             for sched_name, sched_items in parsed_sched.items():
-                if norm_t in sched_name or sched_name in norm_t or (len(norm_t.split()) > 0 and norm_t.split()[0] in sched_name):
+                if norm_t in sched_name or sched_name in norm_t or any(part in sched_name for part in norm_t.split() if len(part) > 2):
                     items.extend(sched_items)
             
             pending_subjects = []
@@ -746,7 +743,7 @@ def admin_dashboard():
             norm_t = normalize_name(t_info['name'])
             items = []
             for sched_name, sched_items in parsed_sched.items():
-                if norm_t in sched_name or sched_name in norm_t or (len(norm_t.split()) > 0 and norm_t.split()[0] in sched_name):
+                if norm_t in sched_name or sched_name in norm_t or any(part in sched_name for part in norm_t.split() if len(part) > 2):
                     items.extend(sched_items)
             
             seen_combos = set()
@@ -828,7 +825,7 @@ def admin_dashboard():
                     schedule_mapping[c_name][major_name].append(t_obj)
     
     if not schedule_mapping and teachers_db:
-        schedule_mapping["الصف العام"] = {"الاختصاص العام": [{"username": u, "name": t['name']} for u, t in teachers_db.items()]}
+        schedule_mapping["الصف الأول"] = {"الاختصاص العام": [{"username": u, "name": t['name']} for u, t in teachers_db.items()]}
 
     admin_template = '''
     <!DOCTYPE html>
@@ -1096,8 +1093,13 @@ def teacher_dashboard():
 
     parsed_schedule = directorate_excel_tables.get('teachers_and_subjects', {}).get('parsed_schedule', {})
     my_schedule_items = []
+    
+    # مطابقة ذكية مرنة للأسم (سواء طابق الاسم كاملاً أو جزءاً منه أو الاسم الأول والأخير)
     for sched_name, items in parsed_schedule.items():
-        if norm_t_name in sched_name or sched_name in norm_t_name or (len(norm_t_name.split()) > 0 and norm_t_name.split()[0] in sched_name):
+        if (norm_t_name in sched_name or 
+            sched_name in norm_t_name or 
+            any(part in sched_name for part in norm_t_name.split() if len(part) > 2) or
+            any(part in norm_t_name for part in sched_name.split() if len(part) > 2)):
             my_schedule_items.extend(items)
 
     my_classes_map = {}
@@ -1115,7 +1117,6 @@ def teacher_dashboard():
         if action == 'submit_class_grades':
             class_name = request.form.get('class_name')
             raw_subject_name = request.form.get('subject_name')
-            # استخراج اسم المادة الصافي بدون النوع (نظري/تطبيقي)
             subject_name = raw_subject_name.split(' (')[0] if ' (' in raw_subject_name else raw_subject_name
             
             perm_key = f"{username} || {class_name} || {subject_name}"
