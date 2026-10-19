@@ -16,8 +16,9 @@ ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'xlsx', 'xls', 'json'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-DB_FILE = 'database.json'
-BACKUP_FILE = 'database_backup.json'
+# مسار ثابت ودائم لحفظ قاعدة البيانات لكي لا تضيع نهائياً عند تحديث الكود
+DB_FILE = os.path.join(os.getcwd(), 'database.json')
+BACKUP_FILE = os.path.join(os.getcwd(), 'database_backup.json')
 
 TRAINING_LOCATIONS = {
     "مستشفى الهرمل الحكومي": {"lat": 34.381283, "lng": 36.424456, "radius_meters": 300},
@@ -51,7 +52,8 @@ directorate_excel_tables = {
     "teachers_cards": {"title": "بطاقات الاساتذة", "columns": [], "data": []},
     "personal_info": {"title": "المعلومات الشخصية", "columns": [], "data": []},
     "weekly_schedule": {"title": "برنامج اسبوعي مع الاساتذة والمواد", "columns": [], "data": [], "parsed_schedule": {}},
-    "executed_hours": {"title": "الساعات المنفذة للاساتذة", "columns": [], "data": [], "monthly_hours": {}}
+    "executed_hours": {"title": "الساعات المنفذة للاساتذة", "columns": [], "data": [], "monthly_hours": {}},
+    "transport_days": {"title": "أيام النقل للاساتذة شهرياً", "columns": [], "data": [], "monthly_transport": {}}
 }
 
 def clean_column_name(col):
@@ -129,12 +131,8 @@ def load_from_disk():
             print(f"Error loading database file: {e}")
     return False
 
-# تحميل البيانات نظيفة بدون أسماء تجريبية لتجنب تكرار الأسماء
-if not load_from_disk():
-    classes_students = {}
-    teachers_db = {}
-    teacher_classes_map = {}
-    save_to_disk()
+# استدعاء دالة التحميل المباشر عند تشغيل البرنامج
+load_from_disk()
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -199,6 +197,7 @@ HEADER_VTE_HTML = '''
             <a href="javascript:void(0)" onclick="showSection('viewTeachersCards')">📇 بطاقات الاساتذة والمعلومات الشخصية</a>
             <a href="javascript:void(0)" onclick="showSection('viewWeeklySchedule')">📅 البرنامج الأسبوعي والأساتذة والمواد</a>
             <a href="javascript:void(0)" onclick="showSection('viewExecutedHours')">⏱️ الساعات المنفذة شهرياً (نظام المديرية)</a>
+            <a href="javascript:void(0)" onclick="showSection('viewTransportDays')">🚗 بدل وأيام النقل شهرياً</a>
         </div>
     </div>
 
@@ -405,11 +404,26 @@ def admin_dashboard():
                         "teachers_cards": "بطاقات الاساتذة",
                         "personal_info": "المعلومات الشخصية",
                         "weekly_schedule": "برنامج اسبوعي مع الاساتذة والمواد",
-                        "executed_hours": "الساعات المنفذة للاساتذة"
+                        "executed_hours": "الساعات المنفذة للاساتذة",
+                        "transport_days": "أيام النقل للاساتذة شهرياً"
                     }
                     
                     table_title = title_map.get(file_key, "ملف المديرية")
                     
+                    if file_key in ['teachers_cards', 'personal_info']:
+                        for r in rows_data:
+                            t_raw_name = r.get('الاسم الثلاثي', r.get('اسم الاستاذ', r.get('الاسم', ''))).strip()
+                            t_norm_key = normalize_name(t_raw_name)
+                            allowed_hrs = r.get('عدد الساعات المسموح بها', r.get('الساعات المسموح بها', r.get('Maxhoures', '')))
+                            if t_norm_key and allowed_hrs:
+                                try:
+                                    c_val = float(allowed_hrs)
+                                    for u, t_info in teachers_db.items():
+                                        if normalize_name(t_info['name']) == t_norm_key:
+                                            t_info['contract_hours'] = int(c_val)
+                                except:
+                                    pass
+
                     if file_key == 'executed_hours':
                         monthly_map = {}
                         contract_map = {}
@@ -421,11 +435,12 @@ def admin_dashboard():
                                 if t_norm_key not in monthly_map:
                                     monthly_map[t_norm_key] = {}
                                 
-                                try:
-                                    c_hrs = float(r.get('Maxhoures', 300) or 300)
-                                    contract_map[t_norm_key] = int(c_hrs)
-                                except:
-                                    contract_map[t_norm_key] = 300
+                                allowed_hrs = r.get('عدد الساعات المسموح بها', r.get('Maxhoures', None))
+                                if allowed_hrs is not None and str(allowed_hrs).strip() != '':
+                                    try:
+                                        contract_map[t_norm_key] = int(float(allowed_hrs))
+                                    except:
+                                        pass
                                 
                                 for m_col in MONTH_COLUMNS:
                                     found_val = None
@@ -450,11 +465,35 @@ def admin_dashboard():
                             if t_norm in contract_map:
                                 t_info['contract_hours'] = contract_map[t_norm]
 
+                    if file_key == 'transport_days':
+                        transport_map = {}
+                        for r in rows_data:
+                            t_raw_name = r.get('الاسم الثلاثي', r.get('اسم الاستاذ', '')).strip()
+                            t_norm_key = normalize_name(t_raw_name)
+                            if t_raw_name:
+                                if t_norm_key not in transport_map:
+                                    transport_map[t_norm_key] = {}
+                                for m_col in MONTH_COLUMNS:
+                                    found_val = None
+                                    for key, val in r.items():
+                                        if clean_column_name(key) == m_col:
+                                            found_val = val
+                                            break
+                                    if found_val is not None:
+                                        try:
+                                            transport_map[t_norm_key][m_col] = float(found_val or 0)
+                                        except:
+                                            transport_map[t_norm_key][m_col] = 0.0
+                                    else:
+                                        transport_map[t_norm_key][m_col] = 0.0
+                        directorate_excel_tables['transport_days']['monthly_transport'] = transport_map
+
                     directorate_excel_tables[file_key] = {
                         "title": table_title,
                         "columns": clean_columns,
                         "data": rows_data,
-                        "monthly_hours": directorate_excel_tables.get('executed_hours', {}).get('monthly_hours', {})
+                        "monthly_hours": directorate_excel_tables.get('executed_hours', {}).get('monthly_hours', {}),
+                        "monthly_transport": directorate_excel_tables.get('transport_days', {}).get('monthly_transport', {})
                     }
                     
                     if file_key == 'weekly_schedule':
@@ -487,6 +526,12 @@ def admin_dashboard():
             for card in t_cards:
                 name = card.get('الاسم الثلاثي', card.get('الاسم', '')).strip()
                 auto_id = card.get('الرقم الالي', card.get('الرقم الآلي', card.get('رقم الاستاذ', '123456'))).strip()
+                allowed_hrs = card.get('عدد الساعات المسموح بها', card.get('الساعات المسموح بها', card.get('Maxhoures', 300)))
+                try:
+                    c_hrs_val = int(float(allowed_hrs))
+                except:
+                    c_hrs_val = 300
+
                 if name:
                     user_id = f"teacher_{len(teachers_db) + 1}"
                     if not any(normalize_name(t['name']) == normalize_name(name) for t in teachers_db.values()):
@@ -499,11 +544,11 @@ def admin_dashboard():
                             "pc_device": "",
                             "notifications": [],
                             "monthly_hours": {},
-                            "contract_hours": 300
+                            "contract_hours": c_hrs_val
                         }
                         count += 1
             save_to_disk()
-            msg = f"تم توليد ({count}) حساب جديد للأساتذة بنجاح! كلمة السر الافتراضية هي الرقم الآلي لكل أستاذ."
+            msg = f"تم توليد ({count}) حساب جديد للأساتذة بنجاح!"
 
         elif action == 'reset_teacher_device':
             target_user = request.form.get('target_user')
@@ -576,6 +621,36 @@ def admin_dashboard():
     else:
         executed_hours_table_html = "<p style='color:#666;'>لم يتم رفع ملف الساعات المنفذة بعد.</p>"
 
+    transport_table_html = ""
+    monthly_trans_map = directorate_excel_tables.get('transport_days', {}).get('monthly_transport', {})
+    if monthly_trans_map:
+        t_headers = "".join([f"<th>ش {m}</th>" for m in MONTH_COLUMNS])
+        t_rows = ""
+        for norm_k, m_dict in monthly_trans_map.items():
+            disp_name = norm_k
+            for t_info in teachers_db.values():
+                if normalize_name(t_info['name']) == norm_k:
+                    disp_name = t_info['name']
+                    break
+            t_tds = "".join([f"<td>{m_dict.get(m, 0):.0f} يوم</td>" for m in MONTH_COLUMNS])
+            total_days = sum(m_dict.values())
+            t_rows += f"<tr><td style='text-align:right; font-weight:bold;'>{disp_name}</td>{t_tds}<td style='background:#e8f5e9;'><b style='color:#2e7d32;'>{total_days:.0f} يوم</b></td></tr>"
+        
+        transport_table_html = f"""
+        <div style="overflow-x:auto;">
+            <table>
+                <tr>
+                    <th style="min-width:180px;">الاسم الثلاثي</th>
+                    {t_headers}
+                    <th>إجمالي أيام النقل</th>
+                </tr>
+                {t_rows}
+            </table>
+        </div>
+        """
+    else:
+        transport_table_html = "<p style='color:#666;'>لم يتم رفع ملف أيام وبدل النقل بعد.</p>"
+
     teachers_rows = ""
     for u, t in teachers_db.items():
         mob_stat = "<span style='color:#2e7d32; font-weight:bold;'>📱 هاتف مرتبط</span>" if t.get('mobile_device') else "<span style='color:#757575;'>📱 هاتف غير مسجل</span>"
@@ -600,8 +675,8 @@ def admin_dashboard():
             <td><code style='color:#0d47a1;'>{u}</code></td>
             <td><b style='color:#d32f2f;'>{t['password']}</b></td>
             <td>{dev_stat}</td>
-            <td><b>{int(contract_hrs)} ساعة</b></td>
-            <td><b style='color:#0d47a1;'>{executed_hrs:.0f} ساعة</b></td>
+            <td><b style='color:#0d47a1;'>{int(contract_hrs)} ساعة</b></td>
+            <td><b>{executed_hrs:.0f} ساعة</b></td>
             <td><b style='color:{rem_color};'>{remaining_hrs:.0f} ساعة</b></td>
         </tr>
         """
@@ -712,11 +787,16 @@ def admin_dashboard():
                 {{ executed_hours_table_html | safe }}
             </div>
 
+            <div id="viewTransportDays" class="card">
+                <h3 style="color:#2e7d32; margin-top:0;">🚗 بدل وأيام النقل للاساتذة شهرياً</h3>
+                {{ transport_table_html | safe }}
+            </div>
+
             <div id="teachersListSec" class="card">
                 <h3 style="color:#0d47a1; margin-top:0;">👨‍🏫 سجل الأساتذة وحسابات الدخول وساعات العقود</h3>
                 <form method="POST" style="margin-bottom:15px;">
                     <input type="hidden" name="action" value="create_auto_accounts">
-                    <button type="submit" style="background:#2e7d32;">⚡ توليد حسابات الأساتذة تلقائياً (كلمة السر الافتراضية = الرقم الآلي)</button>
+                    <button type="submit" style="background:#2e7d32;">⚡ توليد حسابات الأساتذة تلقائياً (العقد مستخرج من عدد الساعات المسموح بها)</button>
                 </form>
                 <table>
                     <tr>
@@ -724,7 +804,7 @@ def admin_dashboard():
                         <th>اسم المستخدم</th>
                         <th>كلمة المرور الحالية</th>
                         <th>الأجهزة المسجلة (هاتف/لابتوب)</th>
-                        <th>العقد الإجمالي</th>
+                        <th>العقد الإجمالي (ساعات مسموح بها)</th>
                         <th>المنفذ حتى الآن</th>
                         <th>المتبقي من العقد</th>
                     </tr>
@@ -753,23 +833,24 @@ def admin_dashboard():
             </div>
 
             <div id="uploadDirectorateFilesSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">⚙️ رفع ملفات المديرية والساعات المنفذة (Excel)</h3>
+                <h3 style="color:#0d47a1; margin-top:0;">⚙️ رفع ملفات المديرية والساعات والأيام (Excel)</h3>
                 <form method="POST" enctype="multipart/form-data">
                     <input type="hidden" name="action" value="upload_directorate_file">
                     
                     <label><b>حدد نوع الملف المراد رفعه:</b></label>
                     <select name="file_key" required style="font-weight:bold; background:#e3f2fd;">
                         <option value="students_registered">📂 1. الطلاب المسجلون</option>
-                        <option value="teachers_cards">📇 2. بطاقات الاساتذة</option>
+                        <option value="teachers_cards">📇 2. بطاقات الاساتذة (يحتوي العقد المسموح)</option>
                         <option value="personal_info">👤 3. المعلومات الشخصية</option>
                         <option value="weekly_schedule">📅 4. البرنامج الأسبوعي مع الاساتذة والمواد</option>
                         <option value="executed_hours">⏱️ 5. الساعات المنفذة للاساتذة</option>
+                        <option value="transport_days">🚗 6. أيام النقل للاساتذة شهرياً</option>
                     </select>
 
                     <label style="margin-top:12px; display:block;"><b>اختر ملف الإكسل (.xlsx أو .xls):</b></label>
                     <input type="file" name="excel_file" accept=".xlsx, .xls" required>
                     
-                    <button type="submit" style="margin-top:15px; background:#2e7d32; font-size:15px;">📥 رفع وتحديث الساعات والعقود فوراً</button>
+                    <button type="submit" style="margin-top:15px; background:#2e7d32; font-size:15px;">📥 رفع وتحديث الملف فوراً</button>
                 </form>
             </div>
 
@@ -812,7 +893,7 @@ def admin_dashboard():
 
                 <div style="background:#fff3e0; padding:15px; border-radius:6px; border:1px solid #ffe0b2;">
                     <h4 style="color:#e65100; margin-top:0;">2. استرداد بيانات سابقة (Upload Backup):</h4>
-                    <p style="color:#555; font-size:13.5px; margin-bottom:10px;">إذا قمت بنقل البرنامج لجهاز جديد أو أردت استرجاع بيانات سابقة، قم برفع ملف الـ JSON المحفوظ لديك هنا:</p>
+                    <p style="color:#555; font-size:13.5px; margin-bottom:10px;">إذا قمت بتنزيل نسخة سابقة، يمكنك رفعها هنا للاسترجاع الفوري:</p>
                     <form method="POST" enctype="multipart/form-data">
                         <input type="hidden" name="action" value="restore_backup_file">
                         <input type="file" name="backup_file" accept=".json" required>
@@ -846,7 +927,7 @@ def admin_dashboard():
     </body>
     </html>
     '''
-    return render_template_string(admin_template, attendance_rows=attendance_rows, grades_rows=grades_rows, teachers_rows=teachers_rows, field_rows=field_rows, replies_html=replies_html, teacher_opts=teacher_opts, locations_opts=locations_opts, directorate_htmls=directorate_htmls, executed_hours_table_html=executed_hours_table_html, msg=msg)
+    return render_template_string(admin_template, attendance_rows=attendance_rows, grades_rows=grades_rows, teachers_rows=teachers_rows, field_rows=field_rows, replies_html=replies_html, teacher_opts=teacher_opts, locations_opts=locations_opts, directorate_htmls=directorate_htmls, executed_hours_table_html=executed_hours_table_html, transport_table_html=transport_table_html, msg=msg)
 
 @app.route('/teacher', methods=['GET', 'POST'])
 def teacher_dashboard():
@@ -918,6 +999,9 @@ def teacher_dashboard():
     executed_hrs = sum([float(v) for v in monthly_hrs.values()]) if monthly_hrs else 0
     remaining_hrs = contract_hrs - executed_hrs
     rem_color = "#2e7d32" if remaining_hrs >= 0 else "#c62828"
+
+    all_transport = directorate_excel_tables.get('transport_days', {}).get('monthly_transport', {})
+    my_transport_days = sum(all_transport.get(norm_t_name, {}).values()) if norm_t_name in all_transport else 0
     
     hrs_html = ""
     if monthly_hrs:
@@ -929,17 +1013,21 @@ def teacher_dashboard():
             <h4 style="color:#0d47a1; margin-top:0; border-bottom:2px solid #e3f2fd; padding-bottom:8px;">📊 ملخص عقد الساعات والمنفذ شهرياً:</h4>
             
             <div style="display:flex; gap:12px; margin-bottom:15px; flex-wrap:wrap;">
-                <div style="flex:1; min-width:140px; background:#e3f2fd; padding:12px; border-radius:8px; text-align:center;">
+                <div style="flex:1; min-width:130px; background:#e3f2fd; padding:12px; border-radius:8px; text-align:center;">
                     <small style="color:#0d47a1; font-weight:bold;">ساعات العقد الإجمالية</small>
                     <div style="font-size:20px; font-weight:bold; color:#0d47a1; margin-top:4px;">{int(contract_hrs)} ساعة</div>
                 </div>
-                <div style="flex:1; min-width:140px; background:#e8f5e9; padding:12px; border-radius:8px; text-align:center;">
+                <div style="flex:1; min-width:130px; background:#e8f5e9; padding:12px; border-radius:8px; text-align:center;">
                     <small style="color:#2e7d32; font-weight:bold;">المنفذ حتى الآن</small>
                     <div style="font-size:20px; font-weight:bold; color:#2e7d32; margin-top:4px;">{executed_hrs:.0f} ساعة</div>
                 </div>
-                <div style="flex:1; min-width:140px; background:#fff3e0; padding:12px; border-radius:8px; text-align:center;">
+                <div style="flex:1; min-width:130px; background:#fff3e0; padding:12px; border-radius:8px; text-align:center;">
                     <small style="color:#e65100; font-weight:bold;">المتبقي من العقد</small>
                     <div style="font-size:20px; font-weight:bold; color:{rem_color}; margin-top:4px;">{remaining_hrs:.0f} ساعة</div>
+                </div>
+                <div style="flex:1; min-width:130px; background:#f3e5f5; padding:12px; border-radius:8px; text-align:center;">
+                    <small style="color:#6a1b9a; font-weight:bold;">أيام النقل المسجلة</small>
+                    <div style="font-size:20px; font-weight:bold; color:#6a1b9a; margin-top:4px;">{my_transport_days:.0f} يوم</div>
                 </div>
             </div>
 
@@ -1156,4 +1244,4 @@ def logout():
     return redirect(url_for('login'))
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000) 
+    app.run(host='0.0.0.0', port=5000)
