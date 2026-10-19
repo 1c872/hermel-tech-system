@@ -133,18 +133,24 @@ def allowed_file(filename):
 
 def parse_weekly_schedule(df):
     parsed_teachers = {}
-    current_class = "عام"
+    current_class = "الصف العام"
+    current_major = "الاختصاص العام"
     
     for _, row in df.iterrows():
-        row_text = " ".join([str(val) for val in row.values if pd.notna(val)])
-        
         for val in row.values:
             if pd.notna(val):
                 v_str = str(val).strip()
-                if any(k in v_str for k in ["الصف", "المستوى", "BT", "TS", "LT", "BP"]):
-                    current_class = v_str
-                    break
-        
+                if any(k in v_str.upper() for k in ["BP", "BT", "TS", "LT", "الصف", "المستوى"]):
+                    if ":" in v_str:
+                        parts = v_str.split(',')
+                        for p in parts:
+                            if "الصف" in p or "class" in p.lower():
+                                current_class = p.replace("الصف", "").replace(":", "").strip()
+                            if "المستوى" in p or "level" in p.lower():
+                                current_major = p.replace("المستوى", "").replace(":", "").strip()
+                    if any(x in v_str.upper() for x in ["BP1", "BP2", "BT1", "BT2", "BT3", "TS1", "TS2", "LT"]):
+                        current_class = v_str
+
         first_col = str(row.iloc[0]).strip() if pd.notna(row.iloc[0]) else ""
         day_name = first_col if any(d in first_col for d in ["الاثنين", "الثلاثاء", "الاربعاء", "الخميس", "الجمعة", "السبت", "الأحد", "الإثنين", "الأربعاء"]) else "أيام الأسبوع"
 
@@ -152,7 +158,7 @@ def parse_weekly_schedule(df):
             cell_val = row.iloc[col_idx]
             if pd.notna(cell_val):
                 cell_str = str(cell_val).strip()
-                if cell_str and cell_str != "nan" and not cell_str.startswith("المستوى") and not cell_str.startswith("الصف"):
+                if cell_str and cell_str != "nan" and not "المستوى" in cell_str and not "الصف" in cell_str:
                     teacher_name = cell_str
                     subject_name = "مادة تعليمية"
                     
@@ -172,13 +178,10 @@ def parse_weekly_schedule(df):
                         if norm_t not in parsed_teachers:
                             parsed_teachers[norm_t] = []
                         
-                        item = {"day": day_name, "period": period_num, "class": current_class, "subject": subject_name}
+                        full_class_name = f"{current_class} - {current_major}"
+                        item = {"day": day_name, "period": period_num, "class": full_class_name, "subject": subject_name}
                         if item not in parsed_teachers[norm_t]:
                             parsed_teachers[norm_t].append(item)
-
-    if not parsed_teachers and teachers_db:
-        for u, t in teachers_db.items():
-            parsed_teachers[normalize_name(t['name'])] = [{"day": "الدوام العام", "period": "حصة عامة", "class": "عام", "subject": t.get('subject', 'مادة عامة')}]
 
     return parsed_teachers
 
@@ -820,9 +823,9 @@ def admin_dashboard():
             for item in items:
                 c_full = item['class']
                 c_name = c_full
-                major_name = "عام"
-                if ":" in c_full:
-                    parts = c_full.split(":")
+                major_name = "الاختصاص"
+                if " - " in c_full:
+                    parts = c_full.split(" - ")
                     c_name = parts[0].strip()
                     major_name = parts[1].strip()
 
@@ -836,7 +839,7 @@ def admin_dashboard():
                     schedule_mapping[c_name][major_name].append(t_obj)
     
     if not schedule_mapping and teachers_db:
-        schedule_mapping["الصف العام"] = {"الاختصاص العام": [{"username": u, "name": t['name']} for u, t in teachers_db.items()]}
+        schedule_mapping["الصف الأول"] = {"الاختصاص العام": [{"username": u, "name": t['name']} for u, t in teachers_db.items()]}
 
     admin_template = '''
     <!DOCTYPE html>
