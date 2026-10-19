@@ -49,8 +49,7 @@ directorate_excel_tables = {
     "students_registered": {"title": "الطلاب المسجلون", "columns": [], "data": []},
     "personal_info": {"title": "المعلومات الشخصية", "columns": [], "data": []},
     "transport_days": {"title": "أيام الحضور وبدل النقل للأساتذة", "columns": [], "data": [], "monthly_transport": {}},
-    "weekly_schedule": {"title": "برنامج أسبوعي مع الأساتذة والمواد", "columns": [], "data": [], "parsed_schedule": {}},
-    "contracts_study": {"title": "دراسة العقود وتوزيع المواد", "columns": [], "data": [], "parsed_schedule": {}},
+    "teachers_and_subjects": {"title": "الاستاذ والمواد (التوزيع الرسمي)", "columns": [], "data": [], "parsed_schedule": {}},
     "teachers_cards": {"title": "بطاقات الأساتذة", "columns": [], "data": []}
 }
 
@@ -132,76 +131,46 @@ load_from_disk()
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def parse_contracts_study(df):
+def parse_teachers_and_subjects(df):
     parsed_teachers = {}
-    current_class_name = "الصف العام"
-    
     for _, row in df.iterrows():
+        # البحث عن الأعمدة بغض النظر عن المسافات أو التسميات الدقيقة
         row_vals = [str(val).strip() for val in row.values if pd.notna(val)]
-        if not row_vals: continue
-        
-        # التقاط اسم الصف من عمود الصف أو السطور التوثيقية
-        c_val = str(row.iloc[0]).strip() if pd.notna(row.iloc[0]) else ""
-        if c_val and "العام الدراسي" not in c_val and c_val != "nan":
-            current_class_name = c_val
+        if len(row_vals) < 3:
+            continue
+            
+        teacher_name, class_name, subject_name, sub_type = "", "", "", "نظري"
+        for col in df.columns:
+            col_str = str(col).strip()
+            val_str = str(row[col]).strip() if pd.notna(row[col]) else ""
+            if "الاستاذ" in col_str or "أستاذ" in col_str:
+                teacher_name = val_str
+            elif "الصف" in col_str or "class" in col_str.lower():
+                class_name = val_str
+            elif "المادة" in col_str or "مادة" in col_str:
+                subject_name = val_str
+            elif "نظري" in col_str or "تطبيقي" in col_str or "نوع" in col_str:
+                sub_type = val_str
 
-        teacher_name = str(row.iloc[2]).strip() if len(row) > 2 and pd.notna(row.iloc[2]) else ""
-        subject_name = str(row.iloc[3]).strip() if len(row) > 3 and pd.notna(row.iloc[3]) else ""
-        
-        if teacher_name and teacher_name != "nan" and subject_name and subject_name != "nan":
+        # إذا لم يتم التعرف بالأسماء، نأخذ الترتيب الافتراضي (العمود 0: أستاذ، العمود 1: صف، العمود 2: مادة، العمود 3: نوع)
+        if not teacher_name and len(row) > 0 and pd.notna(row.iloc[0]):
+            teacher_name = str(row.iloc[0]).strip()
+        if not class_name and len(row) > 1 and pd.notna(row.iloc[1]):
+            class_name = str(row.iloc[1]).strip()
+        if not subject_name and len(row) > 2 and pd.notna(row.iloc[2]):
+            subject_name = str(row.iloc[2]).strip()
+        if len(row) > 3 and pd.notna(row.iloc[3]):
+            sub_type = str(row.iloc[3]).strip()
+
+        if teacher_name and teacher_name != "nan" and subject_name and subject_name != "nan" and class_name and class_name != "nan":
             norm_t = normalize_name(teacher_name)
             if norm_t and len(norm_t) > 2:
                 if norm_t not in parsed_teachers:
                     parsed_teachers[norm_t] = []
                 
-                item = {"day": "حسب العقود", "period": "دوام رسمي", "class": current_class_name, "subject": subject_name}
+                item = {"day": "حسب جدول التوزيع", "period": "دوام رسمي", "class": class_name, "subject": subject_name, "type": sub_type}
                 if item not in parsed_teachers[norm_t]:
                     parsed_teachers[norm_t].append(item)
-
-    return parsed_teachers
-
-def parse_weekly_schedule(df):
-    parsed_teachers = {}
-    current_class = "الصف العام"
-    
-    for _, row in df.iterrows():
-        for val in row.values:
-            if pd.notna(val):
-                v_str = str(val).strip()
-                if any(k in v_str.upper() for k in ["BP", "BT", "TS", "LT", "الصف", "المستوى"]):
-                    if any(x in v_str.upper() for x in ["BP1", "BP2", "BT1", "BT2", "BT3", "TS1", "TS2", "LT"]):
-                        current_class = v_str
-
-        first_col = str(row.iloc[0]).strip() if pd.notna(row.iloc[0]) else ""
-        day_name = first_col if any(d in first_col for d in ["الاثنين", "الثلاثاء", "الاربعاء", "الخميس", "الجمعة", "السبت", "الأحد", "الإثنين", "الأربعاء"]) else "أيام الأسبوع"
-
-        for col_idx in range(len(row)):
-            cell_val = row.iloc[col_idx]
-            if pd.notna(cell_val):
-                cell_str = str(cell_val).strip()
-                if cell_str and cell_str != "nan" and not "المستوى" in cell_str and not "الصف" in cell_str:
-                    teacher_name = cell_str
-                    subject_name = "مادة تعليمية"
-                    
-                    if "/***/" in cell_str:
-                        parts = cell_str.split("/***/")
-                        teacher_name = parts[0].strip()
-                        subject_name = parts[1].strip() if len(parts) > 1 else "مادة عامة"
-                    elif " - " in cell_str:
-                        parts = cell_str.split(" - ")
-                        teacher_name = parts[0].strip()
-                        subject_name = parts[1].strip() if len(parts) > 1 else "مادة عامة"
-
-                    period_num = f"حصة {col_idx}"
-                    norm_t = normalize_name(teacher_name)
-                    
-                    if norm_t and len(norm_t) > 2 and not "المستوى" in norm_t and not "الصف" in norm_t:
-                        if norm_t not in parsed_teachers:
-                            parsed_teachers[norm_t] = []
-                        
-                        item = {"day": day_name, "period": period_num, "class": current_class, "subject": subject_name}
-                        if item not in parsed_teachers[norm_t]:
-                            parsed_teachers[norm_t].append(item)
 
     return parsed_teachers
 
@@ -237,8 +206,7 @@ HEADER_VTE_HTML = '''
         <div class="dropdown-content">
             <a href="javascript:void(0)" onclick="showSection('teachersListSec')">👨‍🏫 سجل الأساتذة وعقود الساعات</a>
             <a href="javascript:void(0)" onclick="showSection('viewTeachersCards')">📇 بطاقات الاساتذة والمعلومات الشخصية</a>
-            <a href="javascript:void(0)" onclick="showSection('viewWeeklySchedule')">📅 البرنامج الأسبوعي الكامل</a>
-            <a href="javascript:void(0)" onclick="showSection('viewContractsStudy')">📊 دراسة العقود وتوزيع المواد</a>
+            <a href="javascript:void(0)" onclick="showSection('viewTeachersAndSubjects')">📋 جدول الاستاذ والمواد وتوزيع الحصص</a>
             <a href="javascript:void(0)" onclick="showSection('viewExecutedHours')">⏱️ الساعات المنفذة شهرياً</a>
             <a href="javascript:void(0)" onclick="showSection('viewTransportDays')">🚗 بدل وأيام النقل شهرياً</a>
         </div>
@@ -551,7 +519,7 @@ def admin_dashboard():
             
             if file and allowed_file(file.filename) and file_key in directorate_excel_tables:
                 try:
-                    df = pd.read_excel(file)
+                    df = pd.read_excel(file, sheet_name=0)
                     col_mapping = {col: clean_column_name(col) for col in df.columns}
                     df_renamed = df.rename(columns=col_mapping)
                     clean_columns = list(df_renamed.columns)
@@ -577,13 +545,9 @@ def admin_dashboard():
                                 except:
                                     pass
 
-                    if file_key == 'weekly_schedule':
-                        parsed = parse_weekly_schedule(df)
-                        directorate_excel_tables['weekly_schedule']['parsed_schedule'] = parsed
-
-                    if file_key == 'contracts_study':
-                        parsed = parse_contracts_study(df)
-                        directorate_excel_tables['contracts_study']['parsed_schedule'] = parsed
+                    if file_key == 'teachers_and_subjects':
+                        parsed = parse_teachers_and_subjects(df)
+                        directorate_excel_tables['teachers_and_subjects']['parsed_schedule'] = parsed
 
                     if file_key == 'executed_hours':
                         monthly_map = {}
@@ -740,14 +704,11 @@ def admin_dashboard():
     else:
         transport_table_html = "<p style='color:#666;'>لم يتم رفع ملف أيام وبدل النقل بعد.</p>"
 
-    # دمج البرنامج الأسبوعي مع جدول دراسة العقود
-    parsed_sched = directorate_excel_tables.get('contracts_study', {}).get('parsed_schedule', {})
-    if not parsed_sched:
-        parsed_sched = directorate_excel_tables.get('weekly_schedule', {}).get('parsed_schedule', {})
+    parsed_sched = directorate_excel_tables.get('teachers_and_subjects', {}).get('parsed_schedule', {})
     
     late_teachers_rows = ""
     if not parsed_sched:
-        late_teachers_rows = "<tr><td colspan='4' style='color:#c62828; font-weight:bold;'>⚠️ لم يتم رفع جدول العقود أو البرنامج الأسبوعي بعد.</td></tr>"
+        late_teachers_rows = "<tr><td colspan='4' style='color:#c62828; font-weight:bold;'>⚠️ لم يتم رفع جدول (الاستاذ والمواد) بعد.</td></tr>"
     else:
         for u, t_info in teachers_db.items():
             norm_t = normalize_name(t_info['name'])
@@ -797,7 +758,7 @@ def admin_dashboard():
                     seen_combos.add(combo_key)
                     official_reports_list_html += f"<tr><td><b>{t_info['name']}</b></td><td><b>{c_name}</b></td><td><b style='color:#0d47a1;'>{s_name}</b></td><td><a href='/report/official_sheet?class_name={c_name}&subject_name={s_name}&teacher_username={u}' target='_blank' style='background:#0d47a1; color:white; padding:5px 12px; border-radius:4px; text-decoration:none;'>📄 فتح التقرير الرسمي</a></td></tr>"
     if not official_reports_list_html:
-        official_reports_list_html = "<tr><td colspan='4'>لم يتم رفع ملف العقود أو البرنامج بعد</td></tr>"
+        official_reports_list_html = "<tr><td colspan='4'>لم يتم رفع ملف الاستاذ والمواد بعد</td></tr>"
 
     attendance_detailed_rows = ""
     if attendance_db:
@@ -947,14 +908,9 @@ def admin_dashboard():
                 {{ directorate_htmls['personal_info'] | safe }}
             </div>
 
-            <div id="viewWeeklySchedule" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">📅 البرنامج الأسبوعي الكامل</h3>
-                {{ directorate_htmls['weekly_schedule'] | safe }}
-            </div>
-
-            <div id="viewContractsStudy" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">📊 دراسة العقود وتوزيع المواد</h3>
-                {{ directorate_htmls['contracts_study'] | safe }}
+            <div id="viewTeachersAndSubjects" class="card">
+                <h3 style="color:#0d47a1; margin-top:0;">📋 جدول الاستاذ والمواد (نظري / تطبيقي)</h3>
+                {{ directorate_htmls['teachers_and_subjects'] | safe }}
             </div>
 
             <div id="viewExecutedHours" class="card">
@@ -1016,13 +972,12 @@ def admin_dashboard():
                     <input type="hidden" name="action" value="upload_directorate_file">
                     <label><b>حدد نوع جدول الإكسل المراد رفعه:</b></label>
                     <select name="file_key" required style="font-weight:bold; background:#e3f2fd;">
-                        <option value="contracts_study">📊 0. دراسة العقود وتوزيع المواد (الجديد)</option>
+                        <option value="teachers_and_subjects">📋 0. جدول الاستاذ والمواد (الجديد والمطلوب)</option>
                         <option value="executed_hours">⏱️ 1. الساعات المنفذة للأساتذة</option>
                         <option value="students_registered">📂 2. الطلاب المسجلون</option>
                         <option value="personal_info">👤 3. المعلومات الشخصية</option>
                         <option value="transport_days">🚗 4. أيام الحضور وبدل النقل للأساتذة</option>
-                        <option value="weekly_schedule">📅 5. برنامج أسبوعي مع الأساتذة والمواد</option>
-                        <option value="teachers_cards">📇 6. بطاقات الأساتذة</option>
+                        <option value="teachers_cards">📇 5. بطاقات الأساتذة</option>
                     </select>
                     <label style="margin-top:12px; display:block;"><b>اختر ملف الإكسل (.xlsx أو .xls):</b></label>
                     <input type="file" name="excel_file" accept=".xlsx, .xls" required style="margin-top:5px;">
@@ -1139,10 +1094,7 @@ def teacher_dashboard():
     norm_t_name = normalize_name(t_name)
     msg = ''
 
-    parsed_schedule = directorate_excel_tables.get('contracts_study', {}).get('parsed_schedule', {})
-    if not parsed_schedule:
-        parsed_schedule = directorate_excel_tables.get('weekly_schedule', {}).get('parsed_schedule', {})
-
+    parsed_schedule = directorate_excel_tables.get('teachers_and_subjects', {}).get('parsed_schedule', {})
     my_schedule_items = []
     for sched_name, items in parsed_schedule.items():
         if norm_t_name in sched_name or sched_name in norm_t_name or (len(norm_t_name.split()) > 0 and norm_t_name.split()[0] in sched_name):
@@ -1151,7 +1103,7 @@ def teacher_dashboard():
     my_classes_map = {}
     for item in my_schedule_items:
         c_name = item['class']
-        s_name = item['subject']
+        s_name = f"{item['subject']} ({item.get('type', 'نظري')})"
         if c_name not in my_classes_map:
             my_classes_map[c_name] = []
         if s_name not in my_classes_map[c_name]:
@@ -1162,7 +1114,9 @@ def teacher_dashboard():
         
         if action == 'submit_class_grades':
             class_name = request.form.get('class_name')
-            subject_name = request.form.get('subject_name')
+            raw_subject_name = request.form.get('subject_name')
+            # استخراج اسم المادة الصافي بدون النوع (نظري/تطبيقي)
+            subject_name = raw_subject_name.split(' (')[0] if ' (' in raw_subject_name else raw_subject_name
             
             perm_key = f"{username} || {class_name} || {subject_name}"
             is_open = grade_edit_permissions.get(perm_key, False)
@@ -1209,10 +1163,11 @@ def teacher_dashboard():
     pending_alerts = []
     for c_name, sub_list in my_classes_map.items():
         st_list = classes_students.get(c_name, [])
-        for s_name in sub_list:
+        for s_full in sub_list:
+            s_name = s_full.split(' (')[0] if ' (' in s_full else s_full
             submitted = any(f"{st} || {c_name} || {s_name}" in grades_db for st in st_list)
             if not submitted:
-                pending_alerts.append(f"⚠️ صف ({c_name}) - مادة ({s_name})")
+                pending_alerts.append(f"⚠️ صف ({c_name}) - مادة ({s_full})")
 
     pending_alerts_html = ""
     if pending_alerts:
@@ -1220,10 +1175,10 @@ def teacher_dashboard():
 
     schedule_html = ""
     if my_schedule_items:
-        s_rows = "".join([f"<tr><td><b>{item['day']}</b></td><td>{item['period']}</td><td>{item['class']}</td><td><b style='color:#0d47a1;'>{item['subject']}</b></td></tr>" for item in my_schedule_items])
-        schedule_html = f"<div class='card' style='border-top:4px solid #2e7d32;'><h4 style='color:#2e7d32; margin-top:0;'>📅 المواد والصفوف الخاصة بي (حسب العقود):</h4><table><tr><th>اليوم</th><th>الدوام</th><th>الصف والمستوى</th><th>المادة</th></tr>{s_rows}</table></div>"
+        s_rows = "".join([f"<tr><td>{item['day']}</td><td>{item['period']}</td><td><b>{item['class']}</b></td><td><b style='color:#0d47a1;'>{item['subject']}</b></td><td><span style='background:#e3f2fd; padding:3px 8px; border-radius:4px; font-size:12px;'>{item.get('type','نظري')}</span></td></tr>" for item in my_schedule_items])
+        schedule_html = f"<div class='card' style='border-top:4px solid #2e7d32;'><h4 style='color:#2e7d32; margin-top:0;'>📋 المواد والصفوف الخاصة بي (حسب جدول الاستاذ والمواد):</h4><table><tr><th>اليوم</th><th>الدوام</th><th>الصف والمستوى</th><th>المادة</th><th>النوع</th></tr>{s_rows}</table></div>"
     else:
-        schedule_html = "<div class='card'><p style='color:#c62828; font-weight:bold;'>⚠️ لم يتم العثور على مواد مرتبطة باسمك في جدول العقود المرفوع. تأكد من رفع ملف دراسة العقود من لوحة الإدارة.</p></div>"
+        schedule_html = "<div class='card'><p style='color:#c62828; font-weight:bold;'>⚠️ لم يتم العثور على مواد مرتبطة باسمك في جدول (الاستاذ والمواد). تأكد من رفع الملف من لوحة الإدارة.</p></div>"
 
     my_monthly_hours = user_data.get('monthly_hours', {})
     total_exec_hrs = sum(my_monthly_hours.values()) if my_monthly_hours else 0
@@ -1398,7 +1353,7 @@ def teacher_dashboard():
                                 <option value="16.5">16.5 / 20</option>
                                 <option value="17">17 / 20</option>
                                 <option value="17.5">17.5 / 20</option>
-                                <option file value="18">18 / 20</option>
+                                <option value="18">18 / 20</option>
                                 <option value="18.5">18.5 / 20</option>
                                 <option value="19">19 / 20</option>
                                 <option value="19.5">19.5 / 20</option>
@@ -1415,16 +1370,16 @@ def teacher_dashboard():
             function loadStudentsForAtt() {
                 let cls = document.getElementById('attClass').value;
                 let cont = document.getElementById('attContainer');
-                let btn = document.getElementById('attButton');
+                let btn = document.getElementById('attBtn');
                 cont.innerHTML = '';
-                if(!cls) { return; }
+                if(!cls) { btn.style.display='none'; return; }
                 fetch('/api/get_students/' + encodeURIComponent(cls)).then(res => res.json()).then(data => {
                     let html = '<p style="font-size:13.5px; color:#0d47a1; font-weight:bold;">الكل حاضر افتراضياً ✅ (أزل الصح عن المتغيب):</p>';
                     data.students.forEach(st => {
                         html += `<div class="student-row"><span style="flex:1;">${st}</span><label style="color:#2e7d32; font-weight:bold; cursor:pointer;"><input type="checkbox" name="attendance_check" value="${st}" checked style="width:auto; transform:scale(1.2);"> حاضر</label></div>`;
                     });
                     cont.innerHTML = html;
-                    document.getElementById('attBtn').style.display = 'block';
+                    btn.style.display = 'block';
                 });
             }
         </script>
