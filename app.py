@@ -129,16 +129,11 @@ def load_from_disk():
             print(f"Error loading database file: {e}")
     return False
 
+# تحميل البيانات نظيفة بدون أسماء تجريبية لتجنب أي تكرار
 if not load_from_disk():
-    classes_students = {
-        "سنة ثالثة عناية تمريضية": ["علي أحمد شمص", "حسن محمد زعيتر", "ميرا شمص", "سيلا شمص"],
-        "سنة ثانية معلوماتية": ["محمد حسين أمهز", "سارة يوسف دندش"]
-    }
-    teachers_db = {
-        "teacher_1": {"name": "أحمد خضر", "password": "101", "auto_id": "101", "subject": "تمريض", "mobile_device": "", "pc_device": "", "notifications": [], "monthly_hours": {}, "contract_hours": 300},
-        "teacher_2": {"name": "علي ناصرالدين", "password": "102", "auto_id": "102", "subject": "معلوماتية", "mobile_device": "", "pc_device": "", "notifications": [], "monthly_hours": {}, "contract_hours": 300}
-    }
-    teacher_classes_map = {"teacher_1": ["سنة ثالثة عناية تمريضية"], "teacher_2": ["سنة ثانية معلوماتية"]}
+    classes_students = {}
+    teachers_db = {}
+    teacher_classes_map = {}
     save_to_disk()
 
 def allowed_file(filename):
