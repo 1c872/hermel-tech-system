@@ -6,13 +6,13 @@ import shutil
 import re
 import pandas as pd
 from datetime import datetime
-from flask import Flask, render_template_string, request, redirect, url_for, session, send_from_directory, jsonify
+from flask import Flask, render_template_string, request, redirect, url_for, session, send_from_directory, jsonify, send_file
 
 app = Flask(__name__)
 app.secret_key = 'hermel_tech_school_shams_secret_key_2026'
 
 UPLOAD_FOLDER = 'uploads'
-ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'xlsx', 'xls'}
+ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'xlsx', 'xls', 'json'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
@@ -57,10 +57,19 @@ directorate_excel_tables = {
 def clean_column_name(col):
     col_str = str(col).strip()
     col_str = col_str.replace("&#x27;", "").replace("'", "").replace('"', '')
-    col_str = re.sub(r'^ش\s*', '', col_str) # إزالة كلمة "ش" إن وجدت
+    col_str = re.sub(r'^ش\s*', '', col_str)
     if len(col_str) == 1 and col_str.isdigit():
         col_str = '0' + col_str
     return col_str
+
+def normalize_name(name):
+    if not name: return ""
+    n = str(name).strip()
+    n = re.sub(r'[أإآ]', 'ا', n)
+    n = re.sub(r'ى', 'ي', n)
+    n = re.sub(r'ة', 'ه', n)
+    n = re.sub(r'\s+', ' ', n)
+    return n.lower()
 
 def calculate_distance(lat1, lon1, lat2, lon2):
     R = 6371000
@@ -126,8 +135,8 @@ if not load_from_disk():
         "سنة ثانية معلوماتية": ["محمد حسين أمهز", "سارة يوسف دندش"]
     }
     teachers_db = {
-        "teacher_1": {"name": "أحمد خضر", "password": "123", "subject": "تمريض", "device_id": "", "notifications": [], "monthly_hours": {}, "contract_hours": 300},
-        "teacher_2": {"name": "علي ناصرالدين", "password": "123", "subject": "معلوماتية", "device_id": "", "notifications": [], "monthly_hours": {}, "contract_hours": 300}
+        "teacher_1": {"name": "أحمد خضر", "password": "101", "auto_id": "101", "subject": "تمريض", "mobile_device": "", "pc_device": "", "notifications": [], "monthly_hours": {}, "contract_hours": 300},
+        "teacher_2": {"name": "علي ناصرالدين", "password": "102", "auto_id": "102", "subject": "معلوماتية", "mobile_device": "", "pc_device": "", "notifications": [], "monthly_hours": {}, "contract_hours": 300}
     }
     teacher_classes_map = {"teacher_1": ["سنة ثالثة عناية تمريضية"], "teacher_2": ["سنة ثانية معلوماتية"]}
     save_to_disk()
@@ -154,9 +163,10 @@ def parse_weekly_schedule(df):
                         teacher_name = parts[0].strip()
                         subject_name = parts[1].strip() if len(parts) > 1 else "مادة عامة"
                         period_num = f"حصة {col_idx}"
-                        if teacher_name not in parsed_teachers:
-                            parsed_teachers[teacher_name] = []
-                        parsed_teachers[teacher_name].append({
+                        norm_t = normalize_name(teacher_name)
+                        if norm_t not in parsed_teachers:
+                            parsed_teachers[norm_t] = []
+                        parsed_teachers[norm_t].append({
                             "day": day_name, "period": period_num, "class": current_class, "subject": subject_name
                         })
     return parsed_teachers
@@ -211,6 +221,7 @@ HEADER_VTE_HTML = '''
             <a href="javascript:void(0)" onclick="showSection('deviceBindingSec')">📱 إدارة أجهزة الأساتذة (فك الربط)</a>
             <a href="javascript:void(0)" onclick="showSection('sendNotifSec')">📢 إرسال تعميم / تنبيه</a>
             <a href="javascript:void(0)" onclick="showSection('teacherRepliesSec')">📩 الرسائل والأعذار الواردة</a>
+            <a href="javascript:void(0)" onclick="showSection('backupSec')">💾 النسخ الاحتياطي والاسترداد</a>
             <a href="javascript:void(0)" onclick="showSection('changePassSec')">🔑 تغيير كلمة السر الإدارية</a>
         </div>
     </div>
@@ -234,7 +245,11 @@ def login():
     if request.method == 'POST':
         username = request.form.get('username', '').strip().lower()
         password = request.form.get('password', '').strip()
-        current_device_fingerprint = request.headers.get('User-Agent', 'unknown_device')
+        user_agent = request.headers.get('User-Agent', '')
+        
+        is_pc = ("Windows" in user_agent or "Macintosh" in user_agent or "Linux" in user_agent) and not "Android" in user_agent
+        device_category = "pc" if is_pc else "mobile"
+        device_fingerprint = f"{'💻 لابتوب' if is_pc else '📱 هاتف'} ({user_agent[:40]})"
         
         if username == admin_credentials['username'] and password == admin_credentials['password']:
             session['username'] = 'admin'
@@ -242,12 +257,23 @@ def login():
             return redirect(url_for('admin_dashboard'))
         elif username in teachers_db and teachers_db[username]['password'] == password:
             t_data = teachers_db[username]
-            if not t_data.get('device_id'):
-                t_data['device_id'] = current_device_fingerprint
-                save_to_disk()
-            elif t_data.get('device_id') != current_device_fingerprint:
-                error = 'عذراً! هذا الحساب مرتبط بهاتف أستاذ آخر. يرجى التواصل مع مدير المعهد لإعادة تعيين الجهاز.'
-                return render_template_string(login_template, error=error)
+            
+            if device_category == "mobile":
+                registered_dev = t_data.get('mobile_device', '')
+                if not registered_dev:
+                    t_data['mobile_device'] = device_fingerprint
+                    save_to_disk()
+                elif registered_dev != device_fingerprint:
+                    error = 'عذراً! حسابك مرتبط بهاتف آخر. التواصل مع الإدارة لفك الربط لتغيير الهاتف.'
+                    return render_template_string(login_template, error=error)
+            else:
+                registered_dev = t_data.get('pc_device', '')
+                if not registered_dev:
+                    t_data['pc_device'] = device_fingerprint
+                    save_to_disk()
+                elif registered_dev != device_fingerprint:
+                    error = 'عذراً! حسابك مرتبط بلابتوب آخر. التواصل مع الإدارة لفك الربط لتغيير اللابتوب.'
+                    return render_template_string(login_template, error=error)
 
             session['username'] = username
             session['role'] = 'teacher'
@@ -278,7 +304,7 @@ login_template = '''
             <h2>معهد الهرمل الفني</h2>
             <form method="POST">
                 <input type="text" name="username" placeholder="اسم المستخدم" required>
-                <input type="password" name="password" placeholder="كلمة المرور" required>
+                <input type="password" name="password" placeholder="كلمة المرور (الرقم الآلي)" required>
                 <button type="submit">دخول النظام</button>
             </form>
             <div style="color:#d32f2f; margin-top:12px; font-weight:bold; font-size:13px;">{{ error }}</div>
@@ -292,6 +318,14 @@ login_template = '''
 def get_students(class_name):
     students = classes_students.get(class_name, [])
     return jsonify({'students': students})
+
+@app.route('/admin/download_backup')
+def download_backup():
+    if session.get('role') != 'admin': return redirect(url_for('login'))
+    save_to_disk()
+    if os.path.exists(DB_FILE):
+        return send_file(DB_FILE, as_attachment=True, download_name=f"hermel_database_backup_{datetime.now().strftime('%Y%m%d_%H%M')}.json")
+    return "ملف البيانات غير موجود", 404
 
 @app.route('/admin/create_field_session', methods=['POST'])
 def create_field_session():
@@ -315,7 +349,7 @@ def create_field_session():
     }
     field_sessions.append(new_s)
     save_to_disk()
-    session['msg'] = "تم تكليف جلسة التدريب الميداني بنجاح!"
+    session['msg'] = "تم تكليف جلسة التدريب الميداني وحفظ البيانات بنجاح!"
     return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/delete_reply/<int:reply_id>', methods=['POST'])
@@ -334,7 +368,19 @@ def admin_dashboard():
     if request.method == 'POST':
         action = request.form.get('action')
         
-        if action == 'upload_directorate_file':
+        if action == 'restore_backup_file':
+            file = request.files.get('backup_file')
+            if file and file.filename.endswith('.json'):
+                try:
+                    file.save(DB_FILE)
+                    load_from_disk()
+                    msg = "تم استرداد قاعدة البيانات بالكامل وتحديث كافة السجلات بنجاح! ✅"
+                except Exception as e:
+                    msg = f"خطأ في استرداد ملف البيانات: {e}"
+            else:
+                msg = "يرجى اختيار ملف نسخة احتياطية بصيغة (.json) صالح."
+
+        elif action == 'upload_directorate_file':
             file_key = request.form.get('file_key')
             file = request.files.get('excel_file')
             
@@ -342,7 +388,6 @@ def admin_dashboard():
                 try:
                     df = pd.read_excel(file)
                     
-                    # إنشاء خريطة تنظيف الأعمدة للتعامل مع أسماء المديرية المتنوعة
                     col_mapping = {}
                     clean_columns = []
                     for original_col in df.columns:
@@ -375,18 +420,18 @@ def admin_dashboard():
                         contract_map = {}
                         
                         for r in rows_data:
-                            t_name = r.get('الاسم الثلاثي', r.get('اسم الاستاذ', '')).strip()
-                            if t_name:
-                                if t_name not in monthly_map:
-                                    monthly_map[t_name] = {}
+                            t_raw_name = r.get('الاسم الثلاثي', r.get('اسم الاستاذ', '')).strip()
+                            t_norm_key = normalize_name(t_raw_name)
+                            if t_raw_name:
+                                if t_norm_key not in monthly_map:
+                                    monthly_map[t_norm_key] = {}
                                 
                                 try:
                                     c_hrs = float(r.get('Maxhoures', 300) or 300)
-                                    contract_map[t_name] = int(c_hrs)
+                                    contract_map[t_norm_key] = int(c_hrs)
                                 except:
-                                    contract_map[t_name] = 300
+                                    contract_map[t_norm_key] = 300
                                 
-                                # قراءة الساعات الشهرية بدقة مع دعم كافة التسميات والتشفيص
                                 for m_col in MONTH_COLUMNS:
                                     found_val = None
                                     for key, val in r.items():
@@ -395,20 +440,20 @@ def admin_dashboard():
                                             break
                                     if found_val is not None:
                                         try:
-                                            monthly_map[t_name][m_col] = float(found_val or 0)
+                                            monthly_map[t_norm_key][m_col] = float(found_val or 0)
                                         except:
-                                            monthly_map[t_name][m_col] = 0.0
+                                            monthly_map[t_norm_key][m_col] = 0.0
                                     else:
-                                        monthly_map[t_name][m_col] = 0.0
+                                        monthly_map[t_norm_key][m_col] = 0.0
                         
                         directorate_excel_tables['executed_hours']['monthly_hours'] = monthly_map
                         
                         for u, t_info in teachers_db.items():
-                            t_real_name = t_info['name'].strip()
-                            if t_real_name in monthly_map:
-                                t_info['monthly_hours'] = monthly_map[t_real_name]
-                            if t_real_name in contract_map:
-                                t_info['contract_hours'] = contract_map[t_real_name]
+                            t_norm = normalize_name(t_info['name'])
+                            if t_norm in monthly_map:
+                                t_info['monthly_hours'] = monthly_map[t_norm]
+                            if t_norm in contract_map:
+                                t_info['contract_hours'] = contract_map[t_norm]
 
                     directorate_excel_tables[file_key] = {
                         "title": table_title,
@@ -435,7 +480,7 @@ def admin_dashboard():
                             classes_students.update(new_classes)
 
                     save_to_disk()
-                    msg = f"تم رفع وتحديث ملف ({table_title}) وقراءة الساعات المنفذة بنجاح!"
+                    msg = f"تم رفع وتحديث ملف ({table_title}) وحفظ البيانات بنجاح!"
                 except Exception as e:
                     msg = f"خطأ في قراءة ملف الإكسل: {e}"
             else:
@@ -446,36 +491,49 @@ def admin_dashboard():
             count = 0
             for card in t_cards:
                 name = card.get('الاسم الثلاثي', card.get('الاسم', '')).strip()
+                auto_id = card.get('الرقم الالي', card.get('الرقم الآلي', card.get('رقم الاستاذ', '123456'))).strip()
                 if name:
                     user_id = f"teacher_{len(teachers_db) + 1}"
-                    if not any(t['name'] == name for t in teachers_db.values()):
+                    if not any(normalize_name(t['name']) == normalize_name(name) for t in teachers_db.values()):
                         teachers_db[user_id] = {
                             "name": name,
-                            "password": "123",
+                            "auto_id": auto_id,
+                            "password": auto_id if auto_id else "123456",
                             "subject": card.get('المادة', 'عام'),
-                            "device_id": "",
+                            "mobile_device": "",
+                            "pc_device": "",
                             "notifications": [],
                             "monthly_hours": {},
                             "contract_hours": 300
                         }
                         count += 1
             save_to_disk()
-            msg = f"تم توليد ({count}) حساب جديد للأساتذة بكلمة سر افتراضية (123)!"
+            msg = f"تم توليد ({count}) حساب جديد للأساتذة بنجاح! كلمة السر الافتراضية هي الرقم الآلي لكل أستاذ."
 
         elif action == 'reset_teacher_device':
             target_user = request.form.get('target_user')
+            reset_type = request.form.get('reset_type', 'all')
+            
             if target_user in teachers_db:
-                teachers_db[target_user]['device_id'] = ''
+                if reset_type == 'mobile':
+                    teachers_db[target_user]['mobile_device'] = ''
+                    msg = f"تم فك ربط الهاتف للأستاذ ({teachers_db[target_user]['name']}) بنجاح!"
+                elif reset_type == 'pc':
+                    teachers_db[target_user]['pc_device'] = ''
+                    msg = f"تم فك ربط اللابتوب للأستاذ ({teachers_db[target_user]['name']}) بنجاح!"
+                else:
+                    teachers_db[target_user]['mobile_device'] = ''
+                    teachers_db[target_user]['pc_device'] = ''
+                    msg = f"تم فك ربط الهاتف واللابتوب للأستاذ ({teachers_db[target_user]['name']}) بنجاح!"
                 save_to_disk()
-                msg = f"تم مسح بصمة الجهاز وإعادة تعيين الهوية للأستاذ ({teachers_db[target_user]['name']}) بنجاح!"
 
         elif action == 'send_notification':
             target_user = request.form.get('target_user')
             notif = request.form.get('notification_text')
             if target_user == 'all':
                 for u, t in teachers_db.items():
-                    t['notifications'].append(f"📢 تعميم: {notif}")
-                msg = "تم إرسال التعميم لجميع الأساتذة!"
+                    t['notifications'].append(notif)
+                msg = "تم إرسال التعميم لجميع الأساتذة وحفظه!"
             elif target_user in teachers_db:
                 teachers_db[target_user]['notifications'].append(notif)
                 msg = f"تم إرسال الإشعار للأستاذ بنجاح!"
@@ -497,10 +555,16 @@ def admin_dashboard():
     if monthly_data_map:
         m_headers = "".join([f"<th>ش {m}</th>" for m in MONTH_COLUMNS])
         m_rows = ""
-        for t_name, m_dict in monthly_data_map.items():
+        for norm_k, m_dict in monthly_data_map.items():
+            disp_name = norm_k
+            for t_info in teachers_db.values():
+                if normalize_name(t_info['name']) == norm_k:
+                    disp_name = t_info['name']
+                    break
+            
             m_tds = "".join([f"<td>{m_dict.get(m, 0):.0f}</td>" for m in MONTH_COLUMNS])
             total_exec = sum(m_dict.values())
-            m_rows += f"<tr><td style='text-align:right; font-weight:bold;'>{t_name}</td>{m_tds}<td style='background:#e3f2fd;'><b style='color:#0d47a1;'>{total_exec:.0f}</b></td></tr>"
+            m_rows += f"<tr><td style='text-align:right; font-weight:bold;'>{disp_name}</td>{m_tds}<td style='background:#e3f2fd;'><b style='color:#0d47a1;'>{total_exec:.0f}</b></td></tr>"
         
         executed_hours_table_html = f"""
         <div style="overflow-x:auto;">
@@ -519,20 +583,27 @@ def admin_dashboard():
 
     teachers_rows = ""
     for u, t in teachers_db.items():
-        dev_stat = "<span style='color:#2e7d32; font-weight:bold;'>مرتبط برقم هاتف</span>" if t.get('device_id') else "<span style='color:#e65100;'>في انتظار تسجيل الهاتف</span>"
+        mob_stat = "<span style='color:#2e7d32; font-weight:bold;'>📱 هاتف مرتبط</span>" if t.get('mobile_device') else "<span style='color:#757575;'>📱 هاتف غير مسجل</span>"
+        pc_stat = "<span style='color:#1565c0; font-weight:bold;'>💻 لابتوب مرتبط</span>" if t.get('pc_device') else "<span style='color:#757575;'>💻 لابتوب غير مسجل</span>"
+        dev_stat = f"{mob_stat}<br>{pc_stat}"
         
+        norm_t = normalize_name(t['name'])
         monthly_h = t.get('monthly_hours', {})
+        if not monthly_h and norm_t in monthly_data_map:
+            monthly_h = monthly_data_map[norm_t]
+            
         executed_hrs = sum([float(v) for v in monthly_h.values()]) if monthly_h else 0
         contract_hrs = float(t.get('contract_hours', 300))
         remaining_hrs = contract_hrs - executed_hrs
         
         rem_color = "#2e7d32" if remaining_hrs >= 0 else "#c62828"
+        auto_id_val = t.get('auto_id', 'غير محدد')
         
         teachers_rows += f"""
         <tr>
-            <td><b>{t['name']}</b></td>
+            <td><b>{t['name']}</b><br><small style='color:#555;'>الرقم الآلي: {auto_id_val}</small></td>
             <td><code style='color:#0d47a1;'>{u}</code></td>
-            <td><code>{t['password']}</code></td>
+            <td><b style='color:#d32f2f;'>{t['password']}</b></td>
             <td>{dev_stat}</td>
             <td><b>{int(contract_hrs)} ساعة</b></td>
             <td><b style='color:#0d47a1;'>{executed_hrs:.0f} ساعة</b></td>
@@ -650,14 +721,14 @@ def admin_dashboard():
                 <h3 style="color:#0d47a1; margin-top:0;">👨‍🏫 سجل الأساتذة وحسابات الدخول وساعات العقود</h3>
                 <form method="POST" style="margin-bottom:15px;">
                     <input type="hidden" name="action" value="create_auto_accounts">
-                    <button type="submit" style="background:#2e7d32;">⚡ توليد يوزر وباسورد افتراضي لجميع الأساتذة تلقائياً</button>
+                    <button type="submit" style="background:#2e7d32;">⚡ توليد حسابات الأساتذة تلقائياً (كلمة السر الافتراضية = الرقم الآلي)</button>
                 </form>
                 <table>
                     <tr>
-                        <th>اسم الأستاذ</th>
+                        <th>اسم الأستاذ والمعلومات</th>
                         <th>اسم المستخدم</th>
-                        <th>كلمة المرور</th>
-                        <th>حالة الهاتف</th>
+                        <th>كلمة المرور الحالية</th>
+                        <th>الأجهزة المسجلة (هاتف/لابتوب)</th>
                         <th>العقد الإجمالي</th>
                         <th>المنفذ حتى الآن</th>
                         <th>المتبقي من العقد</th>
@@ -708,12 +779,20 @@ def admin_dashboard():
             </div>
 
             <div id="deviceBindingSec" class="card">
-                <h3 style="color:#c62828; margin-top:0;">📱 إدارة أجهزة الأساتذة (إعادة تعيين الجهاز بنقرة زر)</h3>
+                <h3 style="color:#c62828; margin-top:0;">📱 إدارة أجهزة الأساتذة (فك ربط الهاتف أو اللابتوب)</h3>
                 <form method="POST">
                     <input type="hidden" name="action" value="reset_teacher_device">
-                    <label>اختر الأستاذ لإعادة تعيين هاتفه الحسابي:</label>
+                    <label>اختر الأستاذ المراد فك ربط جهازه:</label>
                     <select name="target_user" required><option value="">-- اختر الأستاذ --</option>{{ teacher_opts | safe }}</select>
-                    <button type="submit" style="margin-top:10px; background:#c62828;">🔓 مسح البصمة والسماح بتسجيل هاتف جديد للأستاذ</button>
+                    
+                    <label style="margin-top:10px; display:block;">حدد نوع الجهاز المراد إزالته:</label>
+                    <select name="reset_type" required>
+                        <option value="all">🔓 فك ربط كل الأجهزة (الهاتف واللابتوب معا)</option>
+                        <option value="mobile">📱 فك ربط الهاتف المحمول فقط</option>
+                        <option value="pc">💻 فك ربط اللابتوب / الكمبيوتر فقط</option>
+                    </select>
+                    
+                    <button type="submit" style="margin-top:12px; background:#c62828;">🔓 تنفيذ فك الربط والسماح بجهاز جديد</button>
                 </form>
             </div>
 
@@ -725,6 +804,26 @@ def admin_dashboard():
                     <textarea name="notification_text" placeholder="اكتب التعميم..." required style="height:70px;"></textarea>
                     <button type="submit" style="margin-top:10px;">إرسال</button>
                 </form>
+            </div>
+
+            <div id="backupSec" class="card">
+                <h3 style="color:#0d47a1; margin-top:0;">💾 النسخ الاحتياطي والاسترداد</h3>
+                
+                <div style="background:#f1f8e9; padding:15px; border-radius:6px; border:1px solid #c5e1a5; margin-bottom:15px;">
+                    <h4 style="color:#2e7d32; margin-top:0;">1. تنزيل نسخة احتياطية:</h4>
+                    <p style="color:#555; font-size:13.5px; margin-bottom:10px;">قم بتنزيل كافة بيانات النظام (الساعات، العلامات، الحضور، الحسابات) وحفظها على جهازك.</p>
+                    <a href="/admin/download_backup" style="display:inline-block; background:#2e7d32; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:bold;">📥 تنزيل ملف النسخة الاحتياطية (JSON)</a>
+                </div>
+
+                <div style="background:#fff3e0; padding:15px; border-radius:6px; border:1px solid #ffe0b2;">
+                    <h4 style="color:#e65100; margin-top:0;">2. استرداد بيانات سابقة (Upload Backup):</h4>
+                    <p style="color:#555; font-size:13.5px; margin-bottom:10px;">إذا قمت بنقل البرنامج لجهاز جديد أو أردت استرجاع بيانات سابقة، قم برفع ملف الـ JSON المحفوظ لديك هنا:</p>
+                    <form method="POST" enctype="multipart/form-data">
+                        <input type="hidden" name="action" value="restore_backup_file">
+                        <input type="file" name="backup_file" accept=".json" required>
+                        <button type="submit" style="background:#e65100; margin-top:10px;">♻️ استرداد واسترجاع قاعدة البيانات الآن</button>
+                    </form>
+                </div>
             </div>
 
             <div id="teacherRepliesSec" class="card">
@@ -761,6 +860,7 @@ def teacher_dashboard():
     username = session.get('username')
     user_data = teachers_db.get(username, {})
     t_name = user_data.get('name', '').strip()
+    norm_t_name = normalize_name(t_name)
     msg = ''
 
     if request.method == 'POST':
@@ -771,7 +871,7 @@ def teacher_dashboard():
             if new_p:
                 user_data['password'] = new_p
                 save_to_disk()
-                msg = "تم تغيير كلمة المرور الخاصة بك بنجاح!"
+                msg = "تم تغيير كلمة المرور الخاصة بك بنجاح! وستظهر للإدارة في سجل الأساتذة."
 
         elif action == 'submit_class_grades':
             class_name = request.form.get('class_name')
@@ -802,12 +902,27 @@ def teacher_dashboard():
 
     my_classes = teacher_classes_map.get(username, list(classes_students.keys()))
     class_opts = "".join([f'<option value="{c}">{c}</option>' for c in my_classes])
-    notifs = "".join([f"<div style='background:#e3f2fd; padding:8px; margin-bottom:5px; border-radius:4px; font-weight:bold;'>🔔 {n}</div>" for n in user_data.get('notifications', [])])
+    
+    raw_notifs = user_data.get('notifications', [])
+    notifs = ""
+    if raw_notifs:
+        for n in raw_notifs:
+            clean_n = str(n).replace('<p>', '').replace('</p>', '').strip()
+            if clean_n:
+                notifs += f"<div style='background:#e3f2fd; padding:10px; margin-bottom:6px; border-radius:6px; font-weight:bold; color:#0d47a1;'>🔔 {clean_n}</div>"
+    
+    if not notifs:
+        notifs = "<p style='color:#666; margin:0;'>لا توجد تعاميم جديدة.</p>"
 
+    all_monthly_hours = directorate_excel_tables.get('executed_hours', {}).get('monthly_hours', {})
     monthly_hrs = user_data.get('monthly_hours', {})
+    if not monthly_hrs and norm_t_name in all_monthly_hours:
+        monthly_hrs = all_monthly_hours[norm_t_name]
+
     contract_hrs = float(user_data.get('contract_hours', 300))
     executed_hrs = sum([float(v) for v in monthly_hrs.values()]) if monthly_hrs else 0
     remaining_hrs = contract_hrs - executed_hrs
+    rem_color = "#2e7d32" if remaining_hrs >= 0 else "#c62828"
     
     hrs_html = ""
     if monthly_hrs:
@@ -829,7 +944,7 @@ def teacher_dashboard():
                 </div>
                 <div style="flex:1; min-width:140px; background:#fff3e0; padding:12px; border-radius:8px; text-align:center;">
                     <small style="color:#e65100; font-weight:bold;">المتبقي من العقد</small>
-                    <div style="font-size:20px; font-weight:bold; color:#e65100; margin-top:4px;">{remaining_hrs:.0f} ساعة</div>
+                    <div style="font-size:20px; font-weight:bold; color:{rem_color}; margin-top:4px;">{remaining_hrs:.0f} ساعة</div>
                 </div>
             </div>
 
@@ -850,21 +965,28 @@ def teacher_dashboard():
         """
 
     parsed_schedule = directorate_excel_tables.get('weekly_schedule', {}).get('parsed_schedule', {})
-    teacher_schedule_items = parsed_schedule.get(t_name, [])
+    teacher_schedule_items = parsed_schedule.get(norm_t_name, [])
     schedule_html = ""
     if teacher_schedule_items:
         schedule_rows = "".join([f"<tr><td><b>{item['day']}</b></td><td>{item['period']}</td><td>{item['class']}</td><td><b style='color:#0d47a1;'>{item['subject']}</b></td></tr>" for item in teacher_schedule_items])
         schedule_html = f"""
         <div class="card" style="border-top:4px solid #2e7d32;">
-            <h4 style="color:#2e7d32; margin-top:0;">📅 برنامجي الأسبوعي (المستخرج من جدول المديرية):</h4>
+            <h4 style="color:#2e7d32; margin-top:0;">📅 برنامجي الأسبوعي الخطي والمواد الخاصة بي:</h4>
             <table>
                 <tr><th>اليوم</th><th>الحصة</th><th>الصف والمستوى</th><th>المادة</th></tr>
                 {schedule_rows}
             </table>
         </div>
         """
+    else:
+        schedule_html = """
+        <div class="card" style="border-top:4px solid #757575;">
+            <h4 style="color:#616161; margin-top:0;">📅 برنامجي الأسبوعي:</h4>
+            <p style="margin:0; color:#777;">لم يتم استخراج برنامج أسبوعي محدد لهذا الأستاذ من ملف المديرية المرفوع بعد.</p>
+        </div>
+        """
 
-    my_sessions = [s for s in field_sessions if s['primary_teacher'] == t_name or s['secondary_teacher'] == t_name]
+    my_sessions = [s for s in field_sessions if normalize_name(s['primary_teacher']) == norm_t_name or normalize_name(s.get('secondary_teacher', '')) == norm_t_name]
     field_html = ""
     for s in my_sessions:
         if s['status'] == 'قيد التدريب':
@@ -920,7 +1042,7 @@ def teacher_dashboard():
 
             <div class="card">
                 <h4 style="color:#0d47a1; margin-top:0;">📢 التعاميم الواردة:</h4>
-                {{ notifs | safe if notifs else '<p style="color:#666;">لا توجد تعاميم جديدة.</p>' }}
+                {{ notifs | safe }}
             </div>
 
             <div class="card">
