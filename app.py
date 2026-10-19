@@ -98,7 +98,6 @@ def allowed_file(filename):
 def parse_teachers_and_subjects_smart(df):
     parsed_teachers = {}
     
-    # محاولة معرفة أعمدة الأستاذ، الصف، والمادة بذكاء من خلال أسماء الأعمدة أو محتوى الخلايا
     for _, row in df.iterrows():
         row_vals = [str(val).strip() for val in row.values if pd.notna(val) and str(val).strip() != 'nan']
         if len(row_vals) < 2:
@@ -109,10 +108,8 @@ def parse_teachers_and_subjects_smart(df):
         s_name = ""
         s_type = "نظري"
         
-        # فرز محتوى السطر بناءً على المواصفات الشائعة في ملفات المعهد
         for val in row_vals:
-            # إذا كانت تحتوي على كلمات تدل على الصف (مثل BP, BT, TS, LT أو سنة)
-            if any(k in val for k in ["BP", "BT", "TS", "LT", "سنة", "الأولى", "الثانية", "الثالثة", "رعاية", "كهرباء", "ميكانيك", "محاسبة", "إصلاح", "بيع"]):
+            if any(k in val for k in ["BP", "BT", "TS", "LT", "سنة", "رعاية", "كهرباء", "ميكانيك", "محاسبة", "إصلاح", "بيع"]):
                 if not c_name: c_name = val
             elif val in ["نظري", "تطبيقي", "عملي"]:
                 s_type = val
@@ -121,7 +118,6 @@ def parse_teachers_and_subjects_smart(df):
             elif not s_name and val != t_name and val != c_name:
                 s_name = val
 
-        # إذا تعذر التقاطها بالترتيب الافتراضي، نأخذ الأعمدة الصريحة 0, 1, 2
         if not t_name and len(row) > 0 and pd.notna(row.iloc[0]): t_name = str(row.iloc[0]).strip()
         if not c_name and len(row) > 1 and pd.notna(row.iloc[1]): c_name = str(row.iloc[1]).strip()
         if not s_name and len(row) > 2 and pd.notna(row.iloc[2]): s_name = str(row.iloc[2]).strip()
@@ -348,7 +344,6 @@ def admin_dashboard():
                         parsed = parse_teachers_and_subjects_smart(df)
                         directorate_excel_tables['teachers_and_subjects']['parsed_schedule'] = parsed
                         
-                        # توليد الحسابات للأساتذة تلقائياً
                         count = 0
                         for norm_key, data_obj in parsed.items():
                             t_name = data_obj['name']
@@ -385,7 +380,7 @@ def admin_dashboard():
                         if new_classes: classes_students.update(new_classes)
 
                     save_to_disk()
-                    msg = f"تم رفع وتحديث ملف ({file_key}) واستخراج كافة الأساتذة والصفوف بنجاح تام!"
+                    msg = f"تم رفع وتحديث الملف بنجاح واستخراج الأساتذة والمواد بنجاح تام!"
                 except Exception as e:
                     msg = f"خطأ في قراءة ملف الإكسل: {e}"
 
@@ -400,7 +395,7 @@ def admin_dashboard():
             items_str = "<br>".join([f"المادة: <b>{item['subject']}</b> ➔ الصف: <b style='color:#0d47a1;'>{item['class']}</b> (النوع: <span style='color:#2e7d32; font-weight:bold;'>{item['type']}</span>)" for item in data_obj['items']])
             teachers_subjects_rows += f"<tr><td style='font-weight:bold; font-size:15px;'>{t_name}</td><td style='text-align:right;'>{items_str}</td></tr>"
     else:
-        teachers_subjects_rows = "<tr><td colspan='2' style='color:#c62828; font-weight:bold;'>⚠️ لم يتم رفع ملف (الاستاذ والمواد.xlsx) الذكي بعد. قم برفعه من قسم رفع الملفات بالأسفل.</td></tr>"
+        teachers_subjects_rows = "<tr><td colspan='2' style='color:#c62828; font-weight:bold;'>⚠️ لم يتم رفع ملف (الاستاذ والمواد.xlsx) بعد. قم برفعه من قسم رفع الملفات بالأسفل.</td></tr>"
 
     sorted_teachers_list = sorted(teachers_db.items(), key=lambda x: x[1]['name'])
     teachers_credentials_rows = "".join([f"<tr><td><b>{t['name']}</b></td><td><code>{u}</code></td><td><b style='color:#d32f2f;'>{t['password']}</b></td></tr>" for u, t in sorted_teachers_list])
@@ -450,7 +445,7 @@ def admin_dashboard():
             {% if msg %}<div style="background:#e8f5e9; color:#2e7d32; padding:12px; border-radius:6px; font-weight:bold; margin-bottom:15px;">{{ msg }}</div>{% endif %}
 
             <div id="viewTeachersAndSubjects" class="card active">
-                <h3 style="color:#0d47a1; margin-top:0;">📋 جدول الأساتذة والمواد والصفوف (مرتبة أبجدياً أ - ي)</h3>
+                <h3 style="color:#0d47a1; margin-top:0;">📋 جدول الأساتذة والمواد والصفوف (مرتبة أبجديأ أ - ي)</h3>
                 <table>
                     <tr><th style="width:30%;">اسم الأستاذ</th><th>المواد والصفوف المسندة</th></tr>
                     {{ teachers_subjects_rows | safe }}
@@ -671,5 +666,6 @@ def logout():
     session.clear()
     return redirect(url_for('login'))
 
-if __name__ == 'main':
-    app.run(host='0.0.0.0', port=5000)
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
