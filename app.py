@@ -129,7 +129,7 @@ def load_from_disk():
             print(f"Error loading database file: {e}")
     return False
 
-# تحميل البيانات نظيفة بدون أسماء تجريبية لتجنب أي تكرار
+# تحميل البيانات نظيفة بدون أسماء تجريبية لتجنب تكرار الأسماء
 if not load_from_disk():
     classes_students = {}
     teachers_db = {}
