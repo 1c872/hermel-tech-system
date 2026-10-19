@@ -138,16 +138,12 @@ def parse_weekly_schedule(df):
     for _, row in df.iterrows():
         row_text = " ".join([str(val) for val in row.values if pd.notna(val)])
         
-        # التقاط اسم الصف والمستوى بذكاء من أي عمود في السطر
-        class_match = re.search(r'(الصف\s*:[^,\n]+|المستوى\s*:[^,\n]+|BT\d*|TS\d*|LT\d*|BP\d*)', row_text)
-        if class_match or any(keyword in row_text for keyword in ["المستوى", "الصف", "BT", "TS", "LT", "BP", "الاختصاص"]):
-            for val in row.values:
-                if pd.notna(val):
-                    v_str = str(val).strip()
-                    if any(k in v_str for k in ["الصف", "المستوى", "BT", "TS", "LT", "BP"]):
-                        current_class = v_str
-                        break
-            continue
+        for val in row.values:
+            if pd.notna(val):
+                v_str = str(val).strip()
+                if any(k in v_str for k in ["الصف", "المستوى", "BT", "TS", "LT", "BP"]):
+                    current_class = v_str
+                    break
         
         first_col = str(row.iloc[0]).strip() if pd.notna(row.iloc[0]) else ""
         day_name = first_col if any(d in first_col for d in ["الاثنين", "الثلاثاء", "الاربعاء", "الخميس", "الجمعة", "السبت", "الأحد", "الإثنين", "الأربعاء"]) else "أيام الأسبوع"
@@ -179,6 +175,10 @@ def parse_weekly_schedule(df):
                         item = {"day": day_name, "period": period_num, "class": current_class, "subject": subject_name}
                         if item not in parsed_teachers[norm_t]:
                             parsed_teachers[norm_t].append(item)
+
+    if not parsed_teachers and teachers_db:
+        for u, t in teachers_db.items():
+            parsed_teachers[normalize_name(t['name'])] = [{"day": "الدوام العام", "period": "حصة عامة", "class": "عام", "subject": t.get('subject', 'مادة عامة')}]
 
     return parsed_teachers
 
@@ -714,7 +714,6 @@ def admin_dashboard():
 
     parsed_sched = directorate_excel_tables.get('weekly_schedule', {}).get('parsed_schedule', {})
     
-    # فحص دقيق ومضبوط للأساتذة المتأخرين عن تسليم العلامات
     late_teachers_rows = ""
     if not parsed_sched:
         late_teachers_rows = "<tr><td colspan='4' style='color:#c62828; font-weight:bold;'>⚠️ لم يتم رفع البرنامج الأسبوعي بعد أو لم يتم العثور على حصص مبرمجة.</td></tr>"
@@ -732,7 +731,6 @@ def admin_dashboard():
                 s_name = item['subject']
                 st_list = classes_students.get(c_name, [])
                 if not st_list:
-                    # إذا لم يُرفع جدول الطلاب بعد لهذا الصف
                     pending_subjects.append(f"{c_name} ({s_name} - بانتظار طلاب الصف)")
                     continue
                 
@@ -770,7 +768,6 @@ def admin_dashboard():
     if not official_reports_list_html:
         official_reports_list_html = "<tr><td colspan='4'>لم يتم رفع البرنامج الأسبوعي أو ربط الأساتذة بالمطابقة بعد</td></tr>"
 
-    # تقرير حضور وغياب الطلاب المفصل حسب الصف واليوم والشهر
     attendance_detailed_rows = ""
     if attendance_db:
         for key, record in attendance_db.items():
@@ -810,29 +807,36 @@ def admin_dashboard():
     locations_opts = "".join([f"<option value='{loc}'>{loc}</option>" for loc in TRAINING_LOCATIONS.keys()])
 
     schedule_mapping = {}
-    for norm_t, items in parsed_sched.items():
-        t_user_key = None
-        t_disp_name = norm_t
-        for u, t_info in teachers_db.items():
-            if normalize_name(t_info['name']) == norm_t:
-                t_user_key = u
-                t_disp_name = t_info['name']
-                break
-        
-        for item in items:
-            c_full = item['class']
-            parts = c_full.split()
-            c_name = parts[0] if parts else c_full
-            major_name = " ".join(parts[1:]) if len(parts) > 1 else "عام"
-
-            if c_name not in schedule_mapping:
-                schedule_mapping[c_name] = {}
-            if major_name not in schedule_mapping[c_name]:
-                schedule_mapping[c_name][major_name] = []
+    if parsed_sched:
+        for norm_t, items in parsed_sched.items():
+            t_user_key = None
+            t_disp_name = norm_t
+            for u, t_info in teachers_db.items():
+                if normalize_name(t_info['name']) == norm_t:
+                    t_user_key = u
+                    t_disp_name = t_info['name']
+                    break
             
-            t_obj = {"username": t_user_key or norm_t, "name": t_disp_name}
-            if t_obj not in schedule_mapping[c_name][major_name]:
-                schedule_mapping[c_name][major_name].append(t_obj)
+            for item in items:
+                c_full = item['class']
+                c_name = c_full
+                major_name = "عام"
+                if ":" in c_full:
+                    parts = c_full.split(":")
+                    c_name = parts[0].strip()
+                    major_name = parts[1].strip()
+
+                if c_name not in schedule_mapping:
+                    schedule_mapping[c_name] = {}
+                if major_name not in schedule_mapping[c_name]:
+                    schedule_mapping[c_name][major_name] = []
+                
+                t_obj = {"username": t_user_key or norm_t, "name": t_disp_name}
+                if t_obj not in schedule_mapping[c_name][major_name]:
+                    schedule_mapping[c_name][major_name].append(t_obj)
+    
+    if not schedule_mapping and teachers_db:
+        schedule_mapping["الصف العام"] = {"الاختصاص العام": [{"username": u, "name": t['name']} for u, t in teachers_db.items()]}
 
     admin_template = '''
     <!DOCTYPE html>
@@ -1010,7 +1014,15 @@ def admin_dashboard():
 
             <div id="backupSec" class="card">
                 <h3 style="color:#0d47a1; margin-top:0;">💾 النسخ الاحتياطي والاسترداد</h3>
-                <a href="/admin/download_backup" style="display:inline-block; background:#2e7d32; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:bold;">📥 تنزيل نسخة احتياطية (JSON)</a>
+                <div style="display:flex; gap:15px; flex-wrap:wrap; align-items:center; margin-top:12px;">
+                    <a href="/admin/download_backup" style="display:inline-block; background:#2e7d32; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:bold;">📥 تنزيل نسخة احتياطية (JSON)</a>
+                    
+                    <form method="POST" enctype="multipart/form-data" style="display:flex; gap:10px; align-items:center; flex:1; margin:0;">
+                        <input type="hidden" name="action" value="restore_backup_file">
+                        <input type="file" name="backup_file" accept=".json" required style="padding:6px; margin:0;">
+                        <button type="submit" style="background:#c62828; width:auto; padding:10px 18px; margin:0;">📤 استرداد نسخة سابقة</button>
+                    </form>
+                </div>
             </div>
 
             <div id="teacherRepliesSec" class="card">
