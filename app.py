@@ -70,16 +70,6 @@ def normalize_name(name):
     n = re.sub(r'\s+', ' ', n)
     return n.lower()
 
-def calculate_distance(lat1, lon1, lat2, lon2):
-    R = 6371000
-    phi1 = math.radians(lat1)
-    phi2 = math.radians(lat2)
-    delta_phi = math.radians(lat2 - lat1)
-    delta_lambda = math.radians(lon2 - lon1)
-    a = math.sin(delta_phi / 2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2)**2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return R * c
-
 def save_to_disk():
     try:
         data = {
@@ -134,38 +124,18 @@ def allowed_file(filename):
 def parse_teachers_and_subjects(df):
     parsed_teachers = {}
     for _, row in df.iterrows():
-        teacher_name, class_name, subject_name, sub_type = "", "", "", "نظري"
-        
-        # البحث بذكاء داخل الأعمدة
-        for col in df.columns:
-            col_str = str(col).strip()
-            val_str = str(row[col]).strip() if pd.notna(row[col]) else ""
-            if "الاستاذ" in col_str or "أستاذ" in col_str:
-                teacher_name = val_str
-            elif "الصف" in col_str or "class" in col_str.lower():
-                class_name = val_str
-            elif "المادة" in col_str or "مادة" in col_str:
-                subject_name = val_str
-            elif "نظري" in col_str or "تطبيقي" in col_str or "نوع" in col_str:
-                sub_type = val_str
-
-        # اعتماد الترتيب الافتراضي للأعمدة إذا لم تود العناوين الصريحة
-        if not teacher_name and len(row) > 0 and pd.notna(row.iloc[0]):
-            teacher_name = str(row.iloc[0]).strip()
-        if not class_name and len(row) > 1 and pd.notna(row.iloc[1]):
-            class_name = str(row.iloc[1]).strip()
-        if not subject_name and len(row) > 2 and pd.notna(row.iloc[2]):
-            subject_name = str(row.iloc[2]).strip()
-        if len(row) > 3 and pd.notna(row.iloc[3]):
-            sub_type = str(row.iloc[3]).strip()
+        teacher_name = str(row.iloc[0]).strip() if pd.notna(row.iloc[0]) else ""
+        class_name = str(row.iloc[1]).strip() if pd.notna(row.iloc[1]) else ""
+        subject_name = str(row.iloc[2]).strip() if pd.notna(row.iloc[2]) else ""
+        sub_type = str(row.iloc[3]).strip() if len(row) > 3 and pd.notna(row.iloc[3]) else "نظري"
 
         if teacher_name and teacher_name != "nan" and subject_name and subject_name != "nan" and class_name and class_name != "nan":
             norm_t = normalize_name(teacher_name)
-            if norm_t and len(norm_t) > 1:
+            if norm_t:
                 if norm_t not in parsed_teachers:
                     parsed_teachers[norm_t] = []
                 
-                item = {"day": "حسب جدول التوزيع", "period": "دوام رسمي", "class": class_name, "subject": subject_name, "type": sub_type}
+                item = {"day": "حسب التوزيع", "period": "دوام رسمي", "class": class_name, "subject": subject_name, "type": sub_type}
                 if item not in parsed_teachers[norm_t]:
                     parsed_teachers[norm_t].append(item)
 
@@ -484,13 +454,6 @@ def create_field_session():
     session['msg'] = "تم تكليف جلسة التدريب الميداني مع الأستاذ الأساسي والمساعد بنجاح!"
     return redirect(url_for('admin_dashboard'))
 
-@app.route('/admin/delete_reply/<int:reply_id>', methods=['POST'])
-def delete_reply(reply_id):
-    if session.get('role') == 'admin' and 0 <= reply_id < len(admin_replies):
-        admin_replies.pop(reply_id)
-        save_to_disk()
-    return redirect(url_for('admin_dashboard'))
-
 @app.route('/admin', methods=['GET', 'POST'])
 def admin_dashboard():
     if session.get('role') != 'admin':
@@ -545,6 +508,29 @@ def admin_dashboard():
                     if file_key == 'teachers_and_subjects':
                         parsed = parse_teachers_and_subjects(df)
                         directorate_excel_tables['teachers_and_subjects']['parsed_schedule'] = parsed
+                        
+                        # إنشاء/توليد حسابات للأساتذة من ملف الاستاذ والمواد تلقائياً
+                        count_gen = 0
+                        for norm_name, items in parsed.items():
+                            orig_name = items[0]['class'] # name anchor
+                            raw_t_name = str(df[df.iloc[:, 0].astype(str).apply(normalize_name) == norm_name].iloc[0, 0]).strip() if not df[df.iloc[:, 0].astype(str).apply(normalize_name) == norm_name].empty else norm_name
+                            
+                            # التأكد إذا كان الأستاذ موجود في قاعدة الحسابات
+                            exists = any(normalize_name(t['name']) == norm_name or norm_name in normalize_name(t['name']) or normalize_name(t['name']) in norm_name for t in teachers_db.values())
+                            if not exists:
+                                u_id = f"teacher_{len(teachers_db) + 1}"
+                                teachers_db[u_id] = {
+                                    "name": raw_t_name,
+                                    "auto_id": f"100{len(teachers_db)+1}",
+                                    "password": f"100{len(teachers_db)+1}",
+                                    "subject": items[0]['subject'],
+                                    "mobile_device": "",
+                                    "pc_device": "",
+                                    "notifications": [],
+                                    "monthly_hours": {},
+                                    "contract_hours": 300
+                                }
+                                count_gen += 1
 
                     if file_key == 'executed_hours':
                         monthly_map = {}
@@ -614,7 +600,7 @@ def admin_dashboard():
                     }
 
                     save_to_disk()
-                    msg = f"تم رفع وتحديث ملف ({table_title}) وحفظ كافة البيانات بنجاح!"
+                    msg = f"تم رفع وتحديث ملف ({table_title}) وتربيط المواد والحسابات بنجاح!"
                 except Exception as e:
                     msg = f"خطأ في قراءة ملف الإكسل: {e}"
 
@@ -969,7 +955,7 @@ def admin_dashboard():
                     <input type="hidden" name="action" value="upload_directorate_file">
                     <label><b>حدد نوع جدول الإكسل المراد رفعه:</b></label>
                     <select name="file_key" required style="font-weight:bold; background:#e3f2fd;">
-                        <option value="teachers_and_subjects">📋 0. جدول الاستاذ والمواد (الجديد والمطلوب)</option>
+                        <option value="teachers_and_subjects">📋 0. جدول الاستاذ والمواد (المطلوب)</option>
                         <option value="executed_hours">⏱️ 1. الساعات المنفذة للأساتذة</option>
                         <option value="students_registered">📂 2. الطلاب المسجلون</option>
                         <option value="personal_info">👤 3. المعلومات الشخصية</option>
@@ -1094,7 +1080,7 @@ def teacher_dashboard():
     parsed_schedule = directorate_excel_tables.get('teachers_and_subjects', {}).get('parsed_schedule', {})
     my_schedule_items = []
     
-    # مطابقة ذكية مرنة للأسم (سواء طابق الاسم كاملاً أو جزءاً منه أو الاسم الأول والأخير)
+    # مطابقة ذكية شامِلة وقوية جداً للمطابقة بين الأسماء
     for sched_name, items in parsed_schedule.items():
         if (norm_t_name in sched_name or 
             sched_name in norm_t_name or 
@@ -1392,7 +1378,7 @@ def teacher_dashboard():
 @app.route('/logout')
 def logout():
     session.clear()
-    return redirect(url_for('login'))
+    return redirect(url_for('logout'))
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
