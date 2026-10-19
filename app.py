@@ -19,47 +19,22 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 DB_FILE = os.path.join(os.getcwd(), 'database.json')
 BACKUP_FILE = os.path.join(os.getcwd(), 'database_backup.json')
 
-TRAINING_LOCATIONS = {
-    "مستشفى الهرمل الحكومي": {"lat": 34.381283, "lng": 36.424456, "radius_meters": 300},
-    "مستشفى البتول": {"lat": 34.381283, "lng": 36.424456, "radius_meters": 300},
-    "مستشفى دار الكرامة": {"lat": 34.403492, "lng": 36.396789, "radius_meters": 250},
-    "مستشفى العاصي": {"lat": 34.398330, "lng": 36.406490, "radius_meters": 250},
-    "مدرسة سانرايز": {"lat": 34.403492, "lng": 36.396789, "radius_meters": 200},
-    "ثانوية الرشاد": {"lat": 34.403826, "lng": 36.391736, "radius_meters": 200},
-    "مدرسة الإمام علي": {"lat": 34.395518, "lng": 36.386411, "radius_meters": 200}
-}
-
 teachers_db = {}
 grades_db = {}             
 grade_edit_permissions = {} 
 attendance_db = {}        
 classes_students = {}
-admin_replies = []
 admin_credentials = {'username': 'admin', 'password': '123456'}
-
-academic_years_db = ["2025-2026", "2026-2027", "2027-2028", "2028-2029"]
 current_academic_year = "2026-2027"
 
-students_db = []
-field_sessions = []
-MONTH_COLUMNS = ["10", "11", "12", "01", "02", "03", "04", "05", "06", "07", "08"]
-
 directorate_excel_tables = {
-    "executed_hours": {"title": "الساعات المنفذة للأساتذة", "columns": [], "data": [], "monthly_hours": {}},
-    "students_registered": {"title": "الطلاب المسجلون", "columns": [], "data": []},
-    "personal_info": {"title": "المعلومات الشخصية", "columns": [], "data": []},
-    "transport_days": {"title": "أيام الحضور وبدل النقل للأساتذة", "columns": [], "data": [], "monthly_transport": {}},
     "teachers_and_subjects": {"title": "الاستاذ والمواد (التوزيع الرسمي)", "columns": [], "data": [], "parsed_schedule": {}},
+    "students_registered": {"title": "الطلاب المسجلون", "columns": [], "data": []},
     "teachers_cards": {"title": "بطاقات الأساتذة", "columns": [], "data": []}
 }
 
 def clean_column_name(col):
-    col_str = str(col).strip()
-    col_str = col_str.replace("&#x27;", "").replace("'", "").replace('"', '')
-    col_str = re.sub(r'^ش\s*', '', col_str)
-    if len(col_str) == 1 and col_str.isdigit():
-        col_str = '0' + col_str
-    return col_str
+    return str(col).strip().replace("&#x27;", "").replace("'", "").replace('"', '')
 
 def clean_auto_id(val):
     if pd.isna(val) or val is None:
@@ -85,13 +60,9 @@ def save_to_disk():
             'grades_db': grades_db,
             'grade_edit_permissions': grade_edit_permissions,
             'attendance_db': attendance_db,
-            'admin_replies': admin_replies,
             'admin_credentials': admin_credentials,
             'classes_students': classes_students,
-            'academic_years_db': academic_years_db,
             'current_academic_year': current_academic_year,
-            'students_db': students_db,
-            'field_sessions': field_sessions,
             'directorate_excel_tables': directorate_excel_tables
         }
         with open(DB_FILE, 'w', encoding='utf-8') as f:
@@ -101,8 +72,7 @@ def save_to_disk():
         print(f"Error saving database: {e}")
 
 def load_from_disk():
-    global teachers_db, grades_db, grade_edit_permissions, attendance_db, admin_replies, admin_credentials, classes_students
-    global academic_years_db, current_academic_year, students_db, field_sessions, directorate_excel_tables
+    global teachers_db, grades_db, grade_edit_permissions, attendance_db, admin_credentials, classes_students, current_academic_year, directorate_excel_tables
     if os.path.exists(DB_FILE):
         try:
             with open(DB_FILE, 'r', encoding='utf-8') as f:
@@ -111,13 +81,9 @@ def load_from_disk():
                 grades_db = data.get('grades_db', {})
                 grade_edit_permissions = data.get('grade_edit_permissions', {})
                 attendance_db = data.get('attendance_db', {})
-                admin_replies = data.get('admin_replies', [])
                 admin_credentials = data.get('admin_credentials', admin_credentials)
                 classes_students = data.get('classes_students', {})
-                academic_years_db = data.get('academic_years_db', academic_years_db)
                 current_academic_year = data.get('current_academic_year', current_academic_year)
-                students_db = data.get('students_db', [])
-                field_sessions = data.get('field_sessions', [])
                 directorate_excel_tables = data.get('directorate_excel_tables', directorate_excel_tables)
                 return True
         except Exception as e:
@@ -129,21 +95,47 @@ load_from_disk()
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def parse_teachers_and_subjects(df):
+def parse_teachers_and_subjects_smart(df):
     parsed_teachers = {}
+    
+    # محاولة معرفة أعمدة الأستاذ، الصف، والمادة بذكاء من خلال أسماء الأعمدة أو محتوى الخلايا
     for _, row in df.iterrows():
-        teacher_name = str(row.iloc[0]).strip() if pd.notna(row.iloc[0]) else ""
-        class_name = str(row.iloc[1]).strip() if pd.notna(row.iloc[1]) else ""
-        subject_name = str(row.iloc[2]).strip() if pd.notna(row.iloc[2]) else ""
-        sub_type = str(row.iloc[3]).strip() if len(row) > 3 and pd.notna(row.iloc[3]) else "نظري"
+        row_vals = [str(val).strip() for val in row.values if pd.notna(val) and str(val).strip() != 'nan']
+        if len(row_vals) < 2:
+            continue
+            
+        t_name = ""
+        c_name = ""
+        s_name = ""
+        s_type = "نظري"
+        
+        # فرز محتوى السطر بناءً على المواصفات الشائعة في ملفات المعهد
+        for val in row_vals:
+            # إذا كانت تحتوي على كلمات تدل على الصف (مثل BP, BT, TS, LT أو سنة)
+            if any(k in val for k in ["BP", "BT", "TS", "LT", "سنة", "الأولى", "الثانية", "الثالثة", "رعاية", "كهرباء", "ميكانيك", "محاسبة", "إصلاح", "بيع"]):
+                if not c_name: c_name = val
+            elif val in ["نظري", "تطبيقي", "عملي"]:
+                s_type = val
+            elif len(val.split()) >= 2 and not t_name and not any(dig in val for dig in "0123456789"):
+                t_name = val
+            elif not s_name and val != t_name and val != c_name:
+                s_name = val
 
-        if teacher_name and teacher_name != "nan" and subject_name and subject_name != "nan" and class_name and class_name != "nan":
-            norm_t = normalize_name(teacher_name)
+        # إذا تعذر التقاطها بالترتيب الافتراضي، نأخذ الأعمدة الصريحة 0, 1, 2
+        if not t_name and len(row) > 0 and pd.notna(row.iloc[0]): t_name = str(row.iloc[0]).strip()
+        if not c_name and len(row) > 1 and pd.notna(row.iloc[1]): c_name = str(row.iloc[1]).strip()
+        if not s_name and len(row) > 2 and pd.notna(row.iloc[2]): s_name = str(row.iloc[2]).strip()
+        if len(row) > 3 and pd.notna(row.iloc[3]): 
+            t_val = str(row.iloc[3]).strip()
+            if t_val in ["نظري", "تطبيقي", "عملي"]: s_type = t_val
+
+        if t_name and t_name != "nan" and s_name and s_name != "nan" and c_name and c_name != "nan":
+            norm_t = normalize_name(t_name)
             if norm_t:
                 if norm_t not in parsed_teachers:
-                    parsed_teachers[norm_t] = {"name": teacher_name, "items": []}
+                    parsed_teachers[norm_t] = {"name": t_name, "items": []}
                 
-                item = {"day": "حسب التوزيع", "period": "دوام رسمي", "class": class_name, "subject": subject_name, "type": sub_type}
+                item = {"class": c_name, "subject": s_name, "type": s_type}
                 if item not in parsed_teachers[norm_t]["items"]:
                     parsed_teachers[norm_t]["items"].append(item)
 
@@ -164,11 +156,9 @@ HEADER_VTE_HTML = '''
 </div>
 
 <div style="background:#1565c0; padding:0 20px; display:flex; gap:5px; border-bottom:1px solid #1976d2; flex-wrap:wrap;">
-    <button onclick="showSection('viewTeachersAndSubjects')" class="nav-btn">📋 جدول الأساتذة والمواد والصفوق</button>
+    <button onclick="showSection('viewTeachersAndSubjects')" class="nav-btn">📋 جدول الأساتذة والمواد والصفوف</button>
     <button onclick="showSection('studentGradesSec')" class="nav-btn">📝 كشوفات العلامات الرسمية</button>
     <button onclick="showSection('teachersListSec')" class="nav-btn">👨‍🏫 سجل الأساتذة وكلمات المرور</button>
-    <button onclick="showSection('viewExecutedHours')" class="nav-btn">⏱️ الساعات المنفذة شهرياً</button>
-    <button onclick="showSection('viewTransportDays')" class="nav-btn">🚗 بدل وأيام النقل شهرياً</button>
     <button onclick="showSection('uploadDirectorateFilesSec')" class="nav-btn">⚙️ رفع ملفات الإكسل</button>
 </div>
 
@@ -185,36 +175,12 @@ def login():
     if request.method == 'POST':
         username = request.form.get('username', '').strip().lower()
         password = clean_auto_id(request.form.get('password', ''))
-        user_agent = request.headers.get('User-Agent', '')
-        
-        is_pc = ("Windows" in user_agent or "Macintosh" in user_agent or "Linux" in user_agent) and not "Android" in user_agent
-        device_category = "pc" if is_pc else "mobile"
-        device_fingerprint = f"{'💻 لابتوب' if is_pc else '📱 هاتف'} ({user_agent[:40]})"
         
         if username == admin_credentials['username'] and password == admin_credentials['password']:
             session['username'] = 'admin'
             session['role'] = 'admin'
             return redirect(url_for('admin_dashboard'))
         elif username in teachers_db and clean_auto_id(teachers_db[username]['password']) == password:
-            t_data = teachers_db[username]
-            
-            if device_category == "mobile":
-                registered_dev = t_data.get('mobile_device', '')
-                if not registered_dev:
-                    t_data['mobile_device'] = device_fingerprint
-                    save_to_disk()
-                elif registered_dev != device_fingerprint:
-                    error = 'عذراً! حسابك مرتبط بهاتف آخر. التواصل مع الإدارة لفك الربط لتغيير الهاتف.'
-                    return render_template_string(login_template, error=error)
-            else:
-                registered_dev = t_data.get('pc_device', '')
-                if not registered_dev:
-                    t_data['pc_device'] = device_fingerprint
-                    save_to_disk()
-                elif registered_dev != device_fingerprint:
-                    error = 'عذراً! حسابك مرتبط بلابتوب آخر. التواصل مع الإدارة لفك الربط لتغيير اللابتوب.'
-                    return render_template_string(login_template, error=error)
-
             session['username'] = username
             session['role'] = 'teacher'
             return redirect(url_for('teacher_dashboard'))
@@ -374,107 +340,56 @@ def admin_dashboard():
             file_key = request.form.get('file_key')
             file = request.files.get('excel_file')
             
-            if file and allowed_file(file.filename) and file_key in directorate_excel_tables:
+            if file and allowed_file(file.filename):
                 try:
                     df = pd.read_excel(file, sheet_name=0)
-                    col_mapping = {col: clean_column_name(col) for col in df.columns}
-                    df_renamed = df.rename(columns=col_mapping)
-                    clean_columns = list(df_renamed.columns)
                     
-                    rows_data = []
-                    for _, row in df_renamed.iterrows():
-                        row_dict = {col: "" if pd.isna(row[col]) else clean_auto_id(row[col]) for col in df_renamed.columns}
-                        rows_data.append(row_dict)
-                    
-                    table_title = directorate_excel_tables[file_key]['title']
-
                     if file_key == 'teachers_and_subjects':
-                        parsed = parse_teachers_and_subjects(df)
+                        parsed = parse_teachers_and_subjects_smart(df)
                         directorate_excel_tables['teachers_and_subjects']['parsed_schedule'] = parsed
                         
+                        # توليد الحسابات للأساتذة تلقائياً
+                        count = 0
                         for norm_key, data_obj in parsed.items():
-                            raw_name = data_obj['name']
-                            items = data_obj['items']
-                            
-                            exists = any(normalize_name(t['name']) == norm_key or norm_key in normalize_name(t['name']) for t in teachers_db.values())
+                            t_name = data_obj['name']
+                            exists = any(normalize_name(t['name']) == norm_key for t in teachers_db.values())
                             if not exists:
                                 u_id = f"teacher_{len(teachers_db)+1}"
                                 a_pwd = f"100{len(teachers_db)+1}"
                                 teachers_db[u_id] = {
-                                    "name": raw_name,
+                                    "name": t_name,
                                     "auto_id": a_pwd,
                                     "password": a_pwd,
-                                    "subject": items[0]['subject'] if items else "عام",
+                                    "subject": data_obj['items'][0]['subject'] if data_obj['items'] else "عام",
                                     "mobile_device": "",
                                     "pc_device": "",
-                                    "notifications": [],
-                                    "monthly_hours": {},
-                                    "contract_hours": 300
+                                    "notifications": []
                                 }
-
-                    elif file_key == 'executed_hours':
-                        monthly_map = {}
-                        for r in rows_data:
-                            t_raw = r.get('الاسم الثلاثي', r.get('اسم الاستاذ', '')).strip()
-                            t_norm = normalize_name(t_raw)
-                            if t_raw:
-                                if t_norm not in monthly_map: monthly_map[t_norm] = {}
-                                for m_col in MONTH_COLUMNS:
-                                    found_val = None
-                                    for key, val in r.items():
-                                        if clean_column_name(key) == m_col:
-                                            found_val = val
-                                            break
-                                    try: monthly_map[t_norm][m_col] = float(found_val or 0)
-                                    except: monthly_map[t_norm][m_col] = 0.0
-                        directorate_excel_tables['executed_hours']['monthly_hours'] = monthly_map
-                        for u, info in teachers_db.items():
-                            t_norm = normalize_name(info['name'])
-                            if t_norm in monthly_map: info['monthly_hours'] = monthly_map[t_norm]
-
-                    elif file_key == 'transport_days':
-                        transport_map = {}
-                        for r in rows_data:
-                            t_raw = r.get('الاسم الثلاثي', r.get('اسم الاستاذ', '')).strip()
-                            t_norm = normalize_name(t_raw)
-                            if t_raw:
-                                if t_norm not in transport_map: transport_map[t_norm] = {}
-                                for m_col in MONTH_COLUMNS:
-                                    found_val = None
-                                    for key, val in r.items():
-                                        if clean_column_name(key) == m_col:
-                                            found_val = val
-                                            break
-                                    try: transport_map[t_norm][m_col] = float(found_val or 0)
-                                    except: transport_map[t_norm][m_col] = 0.0
-                        directorate_excel_tables['transport_days']['monthly_transport'] = transport_map
+                                count += 1
 
                     elif file_key == 'students_registered':
                         new_classes = {}
-                        for r in rows_data:
-                            c_name = r.get('الصف', r.get('Class', r.get('التخصص', 'غير مصنف')))
-                            s_name = r.get('اسم الطالب الكامل', r.get('اسم الطالب', r.get('الاسم الثلاثي', r.get('الاسم', ''))))
-                            if c_name and s_name and str(c_name) != 'nan' and str(s_name) != 'nan':
+                        for _, row in df.iterrows():
+                            c_name = ""
+                            s_name = ""
+                            for val in row.values:
+                                if pd.notna(val):
+                                    v_str = str(val).strip()
+                                    if any(k in v_str for k in ["BP", "BT", "TS", "LT", "سنة", "رعاية", "كهرباء", "ميكانيك", "محاسبة"]):
+                                        if len(v_str) < 50: c_name = v_str
+                                    elif len(v_str.split()) >= 3 and not s_name:
+                                        s_name = v_str
+                            if c_name and s_name and c_name != 'nan' and s_name != 'nan':
                                 if c_name not in new_classes: new_classes[c_name] = []
                                 if s_name not in new_classes[c_name]: new_classes[c_name].append(s_name)
                         if new_classes: classes_students.update(new_classes)
 
-                    directorate_excel_tables[file_key] = {
-                        "title": table_title,
-                        "columns": clean_columns,
-                        "data": rows_data,
-                        "monthly_hours": directorate_excel_tables.get('executed_hours', {}).get('monthly_hours', {}),
-                        "monthly_transport": directorate_excel_tables.get('transport_days', {}).get('monthly_transport', {})
-                    }
-
                     save_to_disk()
-                    msg = f"تم رفع وتحديث ملف ({table_title}) بنجاح!"
+                    msg = f"تم رفع وتحديث ملف ({file_key}) واستخراج كافة الأساتذة والصفوف بنجاح تام!"
                 except Exception as e:
                     msg = f"خطأ في قراءة ملف الإكسل: {e}"
 
     parsed_sched = directorate_excel_tables.get('teachers_and_subjects', {}).get('parsed_schedule', {})
-    
-    # 1. ترتيب الأساتذة أبجدياً (أ - ي)
     sorted_parsed_keys = sorted(parsed_sched.keys(), key=lambda k: parsed_sched[k]['name'])
 
     teachers_subjects_rows = ""
@@ -482,13 +397,11 @@ def admin_dashboard():
         for norm_k in sorted_parsed_keys:
             data_obj = parsed_sched[norm_k]
             t_name = data_obj['name']
-            # صياغة نصية أنيقة وصريحة بدون أيقونات
-            items_str = "<br>".join([f"المادة: <b>{item['subject']}</b> ➔ الصف: <b style='color:#0d47a1;'>{item['class']}</b> (نوع المادة: <span style='color:#2e7d32; font-weight:bold;'>{item['type']}</span>)" for item in data_obj['items']])
+            items_str = "<br>".join([f"المادة: <b>{item['subject']}</b> ➔ الصف: <b style='color:#0d47a1;'>{item['class']}</b> (النوع: <span style='color:#2e7d32; font-weight:bold;'>{item['type']}</span>)" for item in data_obj['items']])
             teachers_subjects_rows += f"<tr><td style='font-weight:bold; font-size:15px;'>{t_name}</td><td style='text-align:right;'>{items_str}</td></tr>"
     else:
-        teachers_subjects_rows = "<tr><td colspan='2' style='color:#c62828; font-weight:bold;'>⚠️ لم يتم رفع ملف (الاستاذ والمواد.xlsx) بعد. قم برفعه من قسم رفع الملفات.</td></tr>"
+        teachers_subjects_rows = "<tr><td colspan='2' style='color:#c62828; font-weight:bold;'>⚠️ لم يتم رفع ملف (الاستاذ والمواد.xlsx) الذكي بعد. قم برفعه من قسم رفع الملفات بالأسفل.</td></tr>"
 
-    # ترتيب حسابات الأساتذة أبجدياً أيضاً
     sorted_teachers_list = sorted(teachers_db.items(), key=lambda x: x[1]['name'])
     teachers_credentials_rows = "".join([f"<tr><td><b>{t['name']}</b></td><td><code>{u}</code></td><td><b style='color:#d32f2f;'>{t['password']}</b></td></tr>" for u, t in sorted_teachers_list])
     
@@ -511,9 +424,6 @@ def admin_dashboard():
                         official_reports_list_html += f"<tr><td><b>{t_info['name']}</b></td><td><b>{item['class']}</b></td><td><b style='color:#0d47a1;'>{item['subject']}</b> ({item['type']})</td><td><a href='/report/official_sheet?class_name={item['class']}&subject_name={item['subject']}&teacher_username={u}' target='_blank' style='background:#0d47a1; color:white; padding:6px 14px; border-radius:4px; text-decoration:none; font-weight:bold;'>📄 فتح التقرير الرسمي</a></td></tr>"
     if not official_reports_list_html:
         official_reports_list_html = "<tr><td colspan='4'>لم يتم رفع ملف الاستاذ والمواد بعد</td></tr>"
-
-    executed_hours_table_html = directorate_excel_tables.get('executed_hours', {}).get('title', '')
-    transport_table_html = directorate_excel_tables.get('transport_days', {}).get('title', '')
 
     admin_template = '''
     <!DOCTYPE html>
@@ -540,7 +450,7 @@ def admin_dashboard():
             {% if msg %}<div style="background:#e8f5e9; color:#2e7d32; padding:12px; border-radius:6px; font-weight:bold; margin-bottom:15px;">{{ msg }}</div>{% endif %}
 
             <div id="viewTeachersAndSubjects" class="card active">
-                <h3 style="color:#0d47a1; margin-top:0;">📋 جدول الأساتذة والمواد والصفوف (مرتبة أبجديأ أ - ي)</h3>
+                <h3 style="color:#0d47a1; margin-top:0;">📋 جدول الأساتذة والمواد والصفوف (مرتبة أبجدياً أ - ي)</h3>
                 <table>
                     <tr><th style="width:30%;">اسم الأستاذ</th><th>المواد والصفوف المسندة</th></tr>
                     {{ teachers_subjects_rows | safe }}
@@ -560,21 +470,18 @@ def admin_dashboard():
                 <table><tr><th>اسم الأستاذ</th><th>اسم المستخدم</th><th>كلمة المرور</th></tr>{{ teachers_credentials_rows | safe }}</table>
             </div>
 
-            <div id="uploadDirectorateFilesSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">⚙️ رفع ملفات الإكسل (Excel)</h3>
+            <div id="uploadDirectorateFilesSec" class="card" style="display:block; margin-top:20px;">
+                <h3 style="color:#0d47a1; margin-top:0;">⚙️ رفع ملفات الإكسل الذكية (Excel)</h3>
                 <form method="POST" enctype="multipart/form-data">
                     <input type="hidden" name="action" value="upload_directorate_file">
                     <label><b>حدد ملف الإكسل المطلوب رفعه:</b></label>
                     <select name="file_key" required style="font-weight:bold; background:#e3f2fd; font-size:14px;">
-                        <option value="teachers_and_subjects">📋 0. جدول الاستاذ والمواد</option>
-                        <option value="teachers_cards">📇 1. بطاقات الأساتذة</option>
-                        <option value="executed_hours">⏱️ 2. الساعات المنفذة للأساتذة</option>
-                        <option value="transport_days">🚗 3. أيام وبدل النقل</option>
-                        <option value="students_registered">📂 4. الطلاب المسجلون</option>
+                        <option value="teachers_and_subjects">📋 0. جدول الاستاذ والمواد (الذكي)</option>
+                        <option value="students_registered">📂 1. ملف الطلاب المسجلون</option>
                     </select>
                     <label style="margin-top:12px; display:block;"><b>اختر الملف (.xlsx):</b></label>
                     <input type="file" name="excel_file" accept=".xlsx, .xls" required style="margin-top:5px;">
-                    <button type="submit" style="background:#2e7d32; margin-top:15px; font-size:15px;">📥 رفع واستخراج البيانات فوراً</button>
+                    <button type="submit" style="background:#2e7d32; margin-top:15px; font-size:15px;">📥 رفع واستخراج الأساتذة والمواد فوراً</button>
                 </form>
             </div>
         </div>
@@ -764,5 +671,5 @@ def logout():
     session.clear()
     return redirect(url_for('login'))
 
-if __name__ == '__main__':
+if __name__ == 'main':
     app.run(host='0.0.0.0', port=5000)
