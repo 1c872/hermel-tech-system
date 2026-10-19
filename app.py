@@ -581,7 +581,7 @@ def admin_dashboard():
             if target_user == 'all':
                 for u, t in teachers_db.items():
                     t['notifications'].append(formatted_notif)
-                msg = "تم إرسال التعميم والنغمة التنبيهية الأنيقة لجميع الأساتذة بنجاح!"
+                msg = "تم إرسال التعميم ونغمة التنبيه الأنيقة لجميع الأساتذة بنجاح!"
             elif target_user in teachers_db:
                 teachers_db[target_user]['notifications'].append(formatted_notif)
                 msg = f"تم إرسال الإشعار والتنبيه للأستاذ بنجاح!"
@@ -1106,18 +1106,21 @@ def teacher_dashboard():
             th { background: #0d47a1; color: white; }
             .student-row { display: flex; justify-content: space-between; align-items: center; padding: 8px; border-bottom: 1px solid #eee; background: #fafafa; margin-top: 5px; border-radius: 4px; }
             
-            /* النافذة المنبثقة للتنبيه الأنيق */
+            /* النافذة المنبثقة للتنبيه */
             #alertModal { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(13,71,161,0.6); z-index:9999; justify-content:center; align-items:center; backdrop-filter: blur(3px); }
             .alertBox { background:white; padding:25px; border-radius:12px; max-width:85%; text-align:center; box-shadow:0 10px 30px rgba(0,0,0,0.25); border-top:6px solid #0d47a1; }
         </style>
     </head>
-    <body>
+    <body onclick="enableAudioOnUserGesture()">
         <div style="background:#0d47a1; color:white; padding:12px 20px; display:flex; justify-content:space-between; align-items:center;">
             <div><h3 style="margin:0;">معهد الهرمل الفني</h3><small>الأستاذ: {{ t_name }}</small></div>
             <a href="/logout" style="color:#ffcdd2; background:#c62828; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px;">خروج</a>
         </div>
 
-        <!-- نافذة الإشعار الأنيقة -->
+        <!-- صوت الإشعار المحترم والمباشر -->
+        <audio id="notifSound" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" preload="auto"></audio>
+
+        <!-- نافذة الإشعار المنبثقة -->
         <div id="alertModal">
             <div class="alertBox">
                 <div style="font-size:36px; margin-bottom:8px;">🔔</div>
@@ -1184,52 +1187,41 @@ def teacher_dashboard():
 
         <script>
             let lastNotifCount = -1;
+            let audioEnabled = false;
 
-            // نغمة إشعارات محترمة، أنيقة وقصيرة (نغمتين متناغمتين ولطيفتين)
-            function playPoliteNotificationTone() {
-                try {
-                    let ctx = new (window.AudioContext || window.webkitAudioContext)();
-                    
-                    // النغمة الأولى (صوت دافئ ومريح)
-                    let osc1 = ctx.createOscillator();
-                    let gain1 = ctx.createGain();
-                    osc1.type = 'sine';
-                    osc1.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
-                    gain1.gain.setValueAtTime(0.15, ctx.currentTime);
-                    gain1.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
-                    osc1.connect(gain1);
-                    gain1.connect(ctx.destination);
-                    osc1.start(ctx.currentTime);
-                    osc1.stop(ctx.currentTime + 0.25);
-
-                    # النغمة الثانية (أعلى قليلاً ولطيفة)
-                    let osc2 = ctx.createOscillator();
-                    let gain2 = ctx.createGain();
-                    osc2.type = 'sine';
-                    osc2.frequency.setValueAtTime(659.25, ctx.currentTime + 0.12); // E5
-                    gain2.gain.setValueAtTime(0.2, ctx.currentTime + 0.12);
-                    gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
-                    osc2.connect(gain2);
-                    gain2.connect(ctx.destination);
-                    osc2.start(ctx.currentTime + 0.12);
-                    osc2.stop(ctx.currentTime + 0.45);
-
-                } catch(e) {}
+            // إذن سماح الصوت بمجرد لمس الشاشة لأول مرة
+            function enableAudioOnUserGesture() {
+                if(!audioEnabled) {
+                    let audio = document.getElementById('notifSound');
+                    if(audio) {
+                        audio.play().then(() => {
+                            audio.pause();
+                            audio.currentTime = 0;
+                            audioEnabled = true;
+                        }).catch(e => {});
+                    }
+                }
             }
 
-            // اهتزاز خفيف وناعم للهاتف
-            function triggerSoftVibration() {
+            function playNotificationSound() {
+                let audio = document.getElementById('notifSound');
+                if(audio) {
+                    audio.currentTime = 0;
+                    audio.play().catch(e => { console.log("تأكُّد من إذن الصوت للمتصفح"); });
+                }
+            }
+
+            function triggerVibration() {
                 if ("vibrate" in navigator) {
-                    navigator.vibrate([150, 100, 150]);
+                    navigator.vibrate([200, 100, 200, 100, 300]);
                 }
             }
 
             function startFullAlert(msgText) {
                 document.getElementById('alertMessage').innerText = msgText;
                 document.getElementById('alertModal').style.display = 'flex';
-                
-                playPoliteNotificationTone();
-                triggerSoftVibration();
+                playNotificationSound();
+                triggerVibration();
             }
 
             function stopAlert() {
@@ -1237,7 +1229,6 @@ def teacher_dashboard():
                 location.reload();
             }
 
-            // فحص الإشعارات كل 10 ثوانٍ
             function pollNotifications() {
                 fetch('/api/check_notifications').then(res => res.json()).then(data => {
                     let notifs = data.notifications || [];
