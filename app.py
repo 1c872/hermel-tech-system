@@ -312,7 +312,6 @@ def get_students(class_name):
     students = classes_students.get(class_name, [])
     return jsonify({'students': students})
 
-# API للتحقق التلقائي للأساتذة من وجود إشعارات جديدة (Polling)
 @app.route('/api/check_notifications')
 def check_notifications():
     if session.get('role') != 'teacher':
@@ -582,7 +581,7 @@ def admin_dashboard():
             if target_user == 'all':
                 for u, t in teachers_db.items():
                     t['notifications'].append(formatted_notif)
-                msg = "تم إرسال التعميم والتنبيه الصوتي لجميع الأساتذة بنجاح!"
+                msg = "تم إرسال التعميم والنغمة التنبيهية الأنيقة لجميع الأساتذة بنجاح!"
             elif target_user in teachers_db:
                 teachers_db[target_user]['notifications'].append(formatted_notif)
                 msg = f"تم إرسال الإشعار والتنبيه للأستاذ بنجاح!"
@@ -882,12 +881,12 @@ def admin_dashboard():
             </div>
 
             <div id="sendNotifSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">📢 إرسال تعميم إداري أو تنبيه عاجل</h3>
+                <h3 style="color:#0d47a1; margin-top:0;">📢 إرسال تعميم إداري أو تنبيه</h3>
                 <form method="POST">
                     <input type="hidden" name="action" value="send_notification">
-                    <select name="target_user" required><option value="all">📢 إرسال للجميع (سيصدر صوت واهتزاز عاجل على هواتفهم)</option>{{ teacher_opts | safe }}</select>
+                    <select name="target_user" required><option value="all">📢 إرسال للجميع (سيصدر صوت تنبيه مريح وأنيق على هواتفهم)</option>{{ teacher_opts | safe }}</select>
                     <textarea name="notification_text" placeholder="اكتب التعميم..." required style="height:70px;"></textarea>
-                    <button type="submit" style="margin-top:10px; background:#e65100; font-size:15px;">🔔 إرسال التعميم وتشغيل التنبيه الصوتي لدى الأساتذة</button>
+                    <button type="submit" style="margin-top:10px; background:#1565c0; font-size:15px;">🔔 إرسال التعميم ونغمة التنبيه الأنيقة</button>
                 </form>
             </div>
 
@@ -1107,10 +1106,9 @@ def teacher_dashboard():
             th { background: #0d47a1; color: white; }
             .student-row { display: flex; justify-content: space-between; align-items: center; padding: 8px; border-bottom: 1px solid #eee; background: #fafafa; margin-top: 5px; border-radius: 4px; }
             
-            /* النافذة المنبثقة للتنبيه العاجل */
-            #alertModal { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:9999; justify-content:center; align-items:center; }
-            .alertBox { background:white; padding:25px; border-radius:12px; max-width:85%; text-align:center; box-shadow:0 10px 25px rgba(0,0,0,0.3); border-top:6px solid #e65100; animation: pulse 1s infinite alternate; }
-            @keyframes pulse { from { transform: scale(0.98); } to { transform: scale(1.02); } }
+            /* النافذة المنبثقة للتنبيه الأنيق */
+            #alertModal { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(13,71,161,0.6); z-index:9999; justify-content:center; align-items:center; backdrop-filter: blur(3px); }
+            .alertBox { background:white; padding:25px; border-radius:12px; max-width:85%; text-align:center; box-shadow:0 10px 30px rgba(0,0,0,0.25); border-top:6px solid #0d47a1; }
         </style>
     </head>
     <body>
@@ -1119,13 +1117,13 @@ def teacher_dashboard():
             <a href="/logout" style="color:#ffcdd2; background:#c62828; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px;">خروج</a>
         </div>
 
-        <!-- نافذة التنبيه المنبثقة للرسائل العاجلة -->
+        <!-- نافذة الإشعار الأنيقة -->
         <div id="alertModal">
             <div class="alertBox">
-                <div style="font-size:40px; margin-bottom:10px;">🚨</div>
-                <h3 style="color:#e65100; margin:0 0 10px 0;">تنبيه عاجل من إشراف المعهد!</h3>
-                <div id="alertMessage" style="font-size:16px; font-weight:bold; color:#333; margin-bottom:20px; line-height:1.5;"></div>
-                <button type="button" onclick="stopAlert()" style="background:#2e7d32; font-size:16px; padding:12px;">✔ قرأت التعميم والإشعار</button>
+                <div style="font-size:36px; margin-bottom:8px;">🔔</div>
+                <h3 style="color:#0d47a1; margin:0 0 10px 0;">تعميم جديد من إدارة المعهد</h3>
+                <div id="alertMessage" style="font-size:15.5px; font-weight:bold; color:#333; margin-bottom:20px; line-height:1.6;"></div>
+                <button type="button" onclick="stopAlert()" style="background:#0d47a1; font-size:15px; padding:10px 20px; border-radius:6px;">✔ حسناً، قرأت التعميم</button>
             </div>
         </div>
 
@@ -1186,28 +1184,43 @@ def teacher_dashboard():
 
         <script>
             let lastNotifCount = -1;
-            let audioInterval = null;
 
-            // توليد صوت التنبيه برمجياً باستخدام Web Audio API لعلو الصوت والتمييز
-            function playAlertSound() {
+            // نغمة إشعارات محترمة، أنيقة وقصيرة (نغمتين متناغمتين ولطيفتين)
+            function playPoliteNotificationTone() {
                 try {
                     let ctx = new (window.AudioContext || window.webkitAudioContext)();
-                    let osc = ctx.createOscillator();
-                    let gain = ctx.createGain();
-                    osc.type = 'sawtooth';
-                    osc.frequency.setValueAtTime(880, ctx.currentTime); // نغمة مرتفعة تنبيهية
-                    gain.gain.setValueAtTime(0.5, ctx.currentTime);
-                    osc.connect(gain);
-                    gain.connect(ctx.destination);
-                    osc.start();
-                    osc.stop(ctx.currentTime + 0.6);
+                    
+                    // النغمة الأولى (صوت دافئ ومريح)
+                    let osc1 = ctx.createOscillator();
+                    let gain1 = ctx.createGain();
+                    osc1.type = 'sine';
+                    osc1.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
+                    gain1.gain.setValueAtTime(0.15, ctx.currentTime);
+                    gain1.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+                    osc1.connect(gain1);
+                    gain1.connect(ctx.destination);
+                    osc1.start(ctx.currentTime);
+                    osc1.stop(ctx.currentTime + 0.25);
+
+                    # النغمة الثانية (أعلى قليلاً ولطيفة)
+                    let osc2 = ctx.createOscillator();
+                    let gain2 = ctx.createGain();
+                    osc2.type = 'sine';
+                    osc2.frequency.setValueAtTime(659.25, ctx.currentTime + 0.12); // E5
+                    gain2.gain.setValueAtTime(0.2, ctx.currentTime + 0.12);
+                    gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
+                    osc2.connect(gain2);
+                    gain2.connect(ctx.destination);
+                    osc2.start(ctx.currentTime + 0.12);
+                    osc2.stop(ctx.currentTime + 0.45);
+
                 } catch(e) {}
             }
 
-            // تفعيل نمط الاهتزاز في هاتف الأستاذ
-            function triggerVibration() {
+            // اهتزاز خفيف وناعم للهاتف
+            function triggerSoftVibration() {
                 if ("vibrate" in navigator) {
-                    navigator.vibrate([500, 250, 500, 250, 800]); // نمط اهتزاز تنبيهي قوي
+                    navigator.vibrate([150, 100, 150]);
                 }
             }
 
@@ -1215,27 +1228,16 @@ def teacher_dashboard():
                 document.getElementById('alertMessage').innerText = msgText;
                 document.getElementById('alertModal').style.display = 'flex';
                 
-                playAlertSound();
-                triggerVibration();
-                
-                if(!audioInterval) {
-                    audioInterval = setInterval(() => {
-                        playAlertSound();
-                        triggerVibration();
-                    }, 2000); // تكرار التنبيه كل ثانيتين حتى التفاعل
-                }
+                playPoliteNotificationTone();
+                triggerSoftVibration();
             }
 
             function stopAlert() {
                 document.getElementById('alertModal').style.display = 'none';
-                if(audioInterval) {
-                    clearInterval(audioInterval);
-                    audioInterval = null;
-                }
                 location.reload();
             }
 
-            // فحص الإشعارات بالخلفية كل 10 ثوانٍ
+            // فحص الإشعارات كل 10 ثوانٍ
             function pollNotifications() {
                 fetch('/api/check_notifications').then(res => res.json()).then(data => {
                     let notifs = data.notifications || [];
