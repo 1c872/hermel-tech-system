@@ -16,7 +16,7 @@ ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'xlsx', 'xls', 'json'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# مسار ثابت ودائم لحفظ قاعدة البيانات لكي لا تضيع نهائياً عند تحديث الكود
+# مسار ثابت ودائم لحفظ قاعدة البيانات
 DB_FILE = os.path.join(os.getcwd(), 'database.json')
 BACKUP_FILE = os.path.join(os.getcwd(), 'database_backup.json')
 
@@ -131,7 +131,6 @@ def load_from_disk():
             print(f"Error loading database file: {e}")
     return False
 
-# استدعاء دالة التحميل المباشر عند تشغيل البرنامج
 load_from_disk()
 
 def allowed_file(filename):
@@ -312,6 +311,15 @@ login_template = '''
 def get_students(class_name):
     students = classes_students.get(class_name, [])
     return jsonify({'students': students})
+
+# API للتحقق التلقائي للأساتذة من وجود إشعارات جديدة (Polling)
+@app.route('/api/check_notifications')
+def check_notifications():
+    if session.get('role') != 'teacher':
+        return jsonify({'notifications': []})
+    username = session.get('username')
+    user_data = teachers_db.get(username, {})
+    return jsonify({'notifications': user_data.get('notifications', [])})
 
 @app.route('/admin/download_backup')
 def download_backup():
@@ -570,13 +578,14 @@ def admin_dashboard():
         elif action == 'send_notification':
             target_user = request.form.get('target_user')
             notif = request.form.get('notification_text')
+            formatted_notif = f"📢 {notif} (تاريخ الإرسال: {datetime.now().strftime('%Y-%m-%d %H:%M')})"
             if target_user == 'all':
                 for u, t in teachers_db.items():
-                    t['notifications'].append(notif)
-                msg = "تم إرسال التعميم لجميع الأساتذة وحفظه!"
+                    t['notifications'].append(formatted_notif)
+                msg = "تم إرسال التعميم والتنبيه الصوتي لجميع الأساتذة بنجاح!"
             elif target_user in teachers_db:
-                teachers_db[target_user]['notifications'].append(notif)
-                msg = f"تم إرسال الإشعار للأستاذ بنجاح!"
+                teachers_db[target_user]['notifications'].append(formatted_notif)
+                msg = f"تم إرسال الإشعار والتنبيه للأستاذ بنجاح!"
             save_to_disk()
 
         elif action == 'change_admin_password':
@@ -873,12 +882,12 @@ def admin_dashboard():
             </div>
 
             <div id="sendNotifSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">📢 إرسال تعميم إداري</h3>
+                <h3 style="color:#0d47a1; margin-top:0;">📢 إرسال تعميم إداري أو تنبيه عاجل</h3>
                 <form method="POST">
                     <input type="hidden" name="action" value="send_notification">
-                    <select name="target_user" required><option value="all">📢 إرسال للجميع</option>{{ teacher_opts | safe }}</select>
+                    <select name="target_user" required><option value="all">📢 إرسال للجميع (سيصدر صوت واهتزاز عاجل على هواتفهم)</option>{{ teacher_opts | safe }}</select>
                     <textarea name="notification_text" placeholder="اكتب التعميم..." required style="height:70px;"></textarea>
-                    <button type="submit" style="margin-top:10px;">إرسال</button>
+                    <button type="submit" style="margin-top:10px; background:#e65100; font-size:15px;">🔔 إرسال التعميم وتشغيل التنبيه الصوتي لدى الأساتذة</button>
                 </form>
             </div>
 
@@ -982,10 +991,10 @@ def teacher_dashboard():
     raw_notifs = user_data.get('notifications', [])
     notifs = ""
     if raw_notifs:
-        for n in raw_notifs:
+        for n in reversed(raw_notifs):
             clean_n = str(n).replace('<p>', '').replace('</p>', '').strip()
             if clean_n:
-                notifs += f"<div style='background:#e3f2fd; padding:10px; margin-bottom:6px; border-radius:6px; font-weight:bold; color:#0d47a1;'>🔔 {clean_n}</div>"
+                notifs += f"<div style='background:#e3f2fd; padding:12px; margin-bottom:8px; border-radius:6px; font-weight:bold; color:#0d47a1; border-right:4px solid #1565c0;'>{clean_n}</div>"
     
     if not notifs:
         notifs = "<p style='color:#666; margin:0;'>لا توجد تعاميم جديدة.</p>"
@@ -1097,12 +1106,27 @@ def teacher_dashboard():
             th, td { border: 1px solid #e0e0e0; padding: 8px; text-align: center; font-size: 13px; }
             th { background: #0d47a1; color: white; }
             .student-row { display: flex; justify-content: space-between; align-items: center; padding: 8px; border-bottom: 1px solid #eee; background: #fafafa; margin-top: 5px; border-radius: 4px; }
+            
+            /* النافذة المنبثقة للتنبيه العاجل */
+            #alertModal { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:9999; justify-content:center; align-items:center; }
+            .alertBox { background:white; padding:25px; border-radius:12px; max-width:85%; text-align:center; box-shadow:0 10px 25px rgba(0,0,0,0.3); border-top:6px solid #e65100; animation: pulse 1s infinite alternate; }
+            @keyframes pulse { from { transform: scale(0.98); } to { transform: scale(1.02); } }
         </style>
     </head>
     <body>
         <div style="background:#0d47a1; color:white; padding:12px 20px; display:flex; justify-content:space-between; align-items:center;">
             <div><h3 style="margin:0;">معهد الهرمل الفني</h3><small>الأستاذ: {{ t_name }}</small></div>
             <a href="/logout" style="color:#ffcdd2; background:#c62828; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px;">خروج</a>
+        </div>
+
+        <!-- نافذة التنبيه المنبثقة للرسائل العاجلة -->
+        <div id="alertModal">
+            <div class="alertBox">
+                <div style="font-size:40px; margin-bottom:10px;">🚨</div>
+                <h3 style="color:#e65100; margin:0 0 10px 0;">تنبيه عاجل من إشراف المعهد!</h3>
+                <div id="alertMessage" style="font-size:16px; font-weight:bold; color:#333; margin-bottom:20px; line-height:1.5;"></div>
+                <button type="button" onclick="stopAlert()" style="background:#2e7d32; font-size:16px; padding:12px;">✔ قرأت التعميم والإشعار</button>
+            </div>
         </div>
 
         <div style="padding:15px;">
@@ -1124,7 +1148,7 @@ def teacher_dashboard():
             </div>
 
             <div class="card">
-                <h4 style="color:#0d47a1; margin-top:0;">📢 التعاميم الواردة:</h4>
+                <h4 style="color:#0d47a1; margin-top:0;">📢 التعاميم والإشعارات الواردة:</h4>
                 {{ notifs | safe }}
             </div>
 
@@ -1161,6 +1185,72 @@ def teacher_dashboard():
         </div>
 
         <script>
+            let lastNotifCount = -1;
+            let audioInterval = null;
+
+            // توليد صوت التنبيه برمجياً باستخدام Web Audio API لعلو الصوت والتمييز
+            function playAlertSound() {
+                try {
+                    let ctx = new (window.AudioContext || window.webkitAudioContext)();
+                    let osc = ctx.createOscillator();
+                    let gain = ctx.createGain();
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(880, ctx.currentTime); // نغمة مرتفعة تنبيهية
+                    gain.gain.setValueAtTime(0.5, ctx.currentTime);
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.6);
+                } catch(e) {}
+            }
+
+            // تفعيل نمط الاهتزاز في هاتف الأستاذ
+            function triggerVibration() {
+                if ("vibrate" in navigator) {
+                    navigator.vibrate([500, 250, 500, 250, 800]); // نمط اهتزاز تنبيهي قوي
+                }
+            }
+
+            function startFullAlert(msgText) {
+                document.getElementById('alertMessage').innerText = msgText;
+                document.getElementById('alertModal').style.display = 'flex';
+                
+                playAlertSound();
+                triggerVibration();
+                
+                if(!audioInterval) {
+                    audioInterval = setInterval(() => {
+                        playAlertSound();
+                        triggerVibration();
+                    }, 2000); // تكرار التنبيه كل ثانيتين حتى التفاعل
+                }
+            }
+
+            function stopAlert() {
+                document.getElementById('alertModal').style.display = 'none';
+                if(audioInterval) {
+                    clearInterval(audioInterval);
+                    audioInterval = null;
+                }
+                location.reload();
+            }
+
+            // فحص الإشعارات بالخلفية كل 10 ثوانٍ
+            function pollNotifications() {
+                fetch('/api/check_notifications').then(res => res.json()).then(data => {
+                    let notifs = data.notifications || [];
+                    if(lastNotifCount === -1) {
+                        lastNotifCount = notifs.length;
+                    } else if(notifs.length > lastNotifCount) {
+                        lastNotifCount = notifs.length;
+                        let newest = notifs[notifs.length - 1];
+                        startFullAlert(newest);
+                    }
+                });
+            }
+
+            setInterval(pollNotifications, 10000);
+
             function loadStudentsForAtt() {
                 let cls = document.getElementById('attClass').value;
                 let cont = document.getElementById('attContainer');
