@@ -136,41 +136,49 @@ def parse_weekly_schedule(df):
     current_class = "عام"
     
     for _, row in df.iterrows():
-        first_col = str(row.iloc[0]).strip() if pd.notna(row.iloc[0]) else ""
+        row_text = " ".join([str(val) for val in row.values if pd.notna(val)])
         
-        if any(keyword in first_col for keyword in ["المستوى", "الصف", "BT", "TS", "LT", "BP", "الفرع", "الاختصاص"]):
-            current_class = first_col
+        # التقاط اسم الصف والمستوى بذكاء من أي عمود في السطر
+        class_match = re.search(r'(الصف\s*:[^,\n]+|المستوى\s*:[^,\n]+|BT\d*|TS\d*|LT\d*|BP\d*)', row_text)
+        if class_match or any(keyword in row_text for keyword in ["المستوى", "الصف", "BT", "TS", "LT", "BP", "الاختصاص"]):
+            for val in row.values:
+                if pd.notna(val):
+                    v_str = str(val).strip()
+                    if any(k in v_str for k in ["الصف", "المستوى", "BT", "TS", "LT", "BP"]):
+                        current_class = v_str
+                        break
             continue
         
-        day_name = first_col
-        if any(d in day_name for d in ["الاثنين", "الثلاثاء", "الاربعاء", "الخميس", "الجمعة", "السبت", "الأحد", "الإثنين", "الأربعاء"]):
-            for col_idx in range(1, len(row)):
-                cell_val = row.iloc[col_idx]
-                if pd.notna(cell_val):
-                    cell_str = str(cell_val).strip()
-                    if cell_str and cell_str != "nan":
-                        teacher_name = cell_str
-                        subject_name = "مادة تعليمية"
-                        
-                        if "/***/" in cell_str:
-                            parts = cell_str.split("/***/")
-                            teacher_name = parts[0].strip()
-                            subject_name = parts[1].strip() if len(parts) > 1 else "مادة عامة"
-                        elif " - " in cell_str:
-                            parts = cell_str.split(" - ")
-                            teacher_name = parts[0].strip()
-                            subject_name = parts[1].strip() if len(parts) > 1 else "مادة عامة"
+        first_col = str(row.iloc[0]).strip() if pd.notna(row.iloc[0]) else ""
+        day_name = first_col if any(d in first_col for d in ["الاثنين", "الثلاثاء", "الاربعاء", "الخميس", "الجمعة", "السبت", "الأحد", "الإثنين", "الأربعاء"]) else "أيام الأسبوع"
 
-                        period_num = f"حصة {col_idx}"
-                        norm_t = normalize_name(teacher_name)
+        for col_idx in range(len(row)):
+            cell_val = row.iloc[col_idx]
+            if pd.notna(cell_val):
+                cell_str = str(cell_val).strip()
+                if cell_str and cell_str != "nan" and not cell_str.startswith("المستوى") and not cell_str.startswith("الصف"):
+                    teacher_name = cell_str
+                    subject_name = "مادة تعليمية"
+                    
+                    if "/***/" in cell_str:
+                        parts = cell_str.split("/***/")
+                        teacher_name = parts[0].strip()
+                        subject_name = parts[1].strip() if len(parts) > 1 else "مادة عامة"
+                    elif " - " in cell_str:
+                        parts = cell_str.split(" - ")
+                        teacher_name = parts[0].strip()
+                        subject_name = parts[1].strip() if len(parts) > 1 else "مادة عامة"
+
+                    period_num = f"حصة {col_idx}"
+                    norm_t = normalize_name(teacher_name)
+                    
+                    if norm_t and len(norm_t) > 2 and not "المستوى" in norm_t and not "الصف" in norm_t:
+                        if norm_t not in parsed_teachers:
+                            parsed_teachers[norm_t] = []
                         
-                        if norm_t:
-                            if norm_t not in parsed_teachers:
-                                parsed_teachers[norm_t] = []
-                            
-                            item = {"day": day_name, "period": period_num, "class": current_class, "subject": subject_name}
-                            if item not in parsed_teachers[norm_t]:
-                                parsed_teachers[norm_t].append(item)
+                        item = {"day": day_name, "period": period_num, "class": current_class, "subject": subject_name}
+                        if item not in parsed_teachers[norm_t]:
+                            parsed_teachers[norm_t].append(item)
 
     return parsed_teachers
 
@@ -194,7 +202,7 @@ HEADER_VTE_HTML = '''
     <div class="dropdown">
         <button class="dropbtn">الطلاب والتقارير ▾</button>
         <div class="dropdown-content">
-            <a href="javascript:void(0)" onclick="showSection('studentAttendanceSec')">📋 حضور وغياب الطلاب</a>
+            <a href="javascript:void(0)" onclick="showSection('studentAttendanceSec')">📋 حضور وغياب الطلاب (حسب اليوم والشهر والصف)</a>
             <a href="javascript:void(0)" onclick="showSection('studentGradesSec')">📝 علامات ونتائج الطلاب الرسمية</a>
             <a href="javascript:void(0)" onclick="showSection('lateTeachersSec')">⚠️ الأساتذة المتأخرون عن رصد العلامات</a>
             <a href="javascript:void(0)" onclick="showSection('viewRegisteredStudents')">📂 جدول الطلاب المسجلون</a>
@@ -341,7 +349,6 @@ def official_report_sheet():
     
     t_info = teachers_db.get(teacher_username, {})
     teacher_display_name = t_info.get('name', teacher_username)
-    
     students = classes_students.get(class_name, [])
     
     report_rows = ""
@@ -357,8 +364,7 @@ def official_report_sheet():
             <td>{idx}</td>
             <td style="text-align:right; font-weight:bold; padding-right:15px;">{st}</td>
             <td style="font-weight:bold; color:#0d47a1; font-size:15px;">{grade_val}</td>
-            <td></td>
-            <td></td>
+            <td></td><td></td>
             <td style="color:#2e7d32; font-weight:bold;">{mod_val}</td>
             <td style="text-align:right; font-size:12px;">{note_val}</td>
         </tr>
@@ -390,7 +396,6 @@ def official_report_sheet():
         <div class="no-print" style="margin-bottom:20px; text-align:left;">
             <button onclick="window.print()" style="background:#0d47a1; color:white; padding:10px 20px; border:none; font-weight:bold; cursor:pointer; border-radius:5px;">🖨️ طباعة التقرير / حفظ كـ PDF</button>
         </div>
-
         <table class="header-table">
             <tr>
                 <td style="width:35%; text-align:right;">
@@ -403,7 +408,6 @@ def official_report_sheet():
                 </td>
             </tr>
         </table>
-
         <table class="info-bar">
             <tr>
                 <td><b>الشهادة والسنة:</b> {class_name}</td>
@@ -415,7 +419,6 @@ def official_report_sheet():
                 <td><b>اسم الأستاذ:</b> {teacher_display_name}</td>
             </tr>
         </table>
-
         <table class="sheet">
             <thead>
                 <tr>
@@ -432,7 +435,6 @@ def official_report_sheet():
                 {report_rows}
             </tbody>
         </table>
-
         <div style="margin-top:30px; display:flex; justify-content:space-between; padding:0 40px; font-weight:bold;">
             <div>توقيع الأستاذ: ..................</div>
             <div>توقيع وتصديق المدير: ..................</div>
@@ -711,39 +713,79 @@ def admin_dashboard():
         transport_table_html = "<p style='color:#666;'>لم يتم رفع ملف أيام وبدل النقل بعد.</p>"
 
     parsed_sched = directorate_excel_tables.get('weekly_schedule', {}).get('parsed_schedule', {})
+    
+    # فحص دقيق ومضبوط للأساتذة المتأخرين عن تسليم العلامات
     late_teachers_rows = ""
-    for u, t_info in teachers_db.items():
-        norm_t = normalize_name(t_info['name'])
-        items = parsed_sched.get(norm_t, [])
-        pending_subjects = []
-        for item in items:
-            c_name = item['class']
-            s_name = item['subject']
-            st_list = classes_students.get(c_name, [])
-            submitted = False
-            for st in st_list:
-                if f"{st} || {c_name} || {s_name}" in grades_db:
-                    submitted = True
-                    break
-            if not submitted:
-                pending_subjects.append(f"{c_name} ({s_name})")
-        if pending_subjects:
-            late_teachers_rows += f"<tr><td><b>{t_info['name']}</b></td><td><code>{u}</code></td><td><span style='color:#c62828; font-weight:bold;'>⚠️ لم يسلم علامات: {', '.join(set(pending_subjects))}</span></td><td><a href='/report/official_sheet?teacher_username={u}' target='_blank'>📄 معاينة</a></td></tr>"
+    if not parsed_sched:
+        late_teachers_rows = "<tr><td colspan='4' style='color:#c62828; font-weight:bold;'>⚠️ لم يتم رفع البرنامج الأسبوعي بعد أو لم يتم العثور على حصص مبرمجة.</td></tr>"
+    else:
+        for u, t_info in teachers_db.items():
+            norm_t = normalize_name(t_info['name'])
+            items = []
+            for sched_name, sched_items in parsed_sched.items():
+                if norm_t in sched_name or sched_name in norm_t or (len(norm_t.split()) > 0 and norm_t.split()[0] in sched_name):
+                    items.extend(sched_items)
+            
+            pending_subjects = []
+            for item in items:
+                c_name = item['class']
+                s_name = item['subject']
+                st_list = classes_students.get(c_name, [])
+                if not st_list:
+                    # إذا لم يُرفع جدول الطلاب بعد لهذا الصف
+                    pending_subjects.append(f"{c_name} ({s_name} - بانتظار طلاب الصف)")
+                    continue
+                
+                submitted_count = 0
+                for st in st_list:
+                    if f"{st} || {c_name} || {s_name}" in grades_db:
+                        submitted_count += 1
+                
+                if submitted_count < len(st_list):
+                    pending_subjects.append(f"{c_name} ({s_name})")
+            
+            if pending_subjects:
+                late_teachers_rows += f"<tr><td><b>{t_info['name']}</b></td><td><code>{u}</code></td><td><span style='color:#c62828; font-weight:bold;'>⚠️ لم يُسلم علامات مواد: {', '.join(set(pending_subjects))}</span></td><td><a href='/report/official_sheet?teacher_username={u}' target='_blank'>📄 معاينة</a></td></tr>"
+
+    if not late_teachers_rows:
+        late_teachers_rows = "<tr><td colspan='4' style='color:#2e7d32; font-weight:bold;'>جميع الأساتذة قاموا بتسليم العلامات لكافة موادهم بنجاح! 🎉</td></tr>"
 
     official_reports_list_html = ""
-    for u, t_info in teachers_db.items():
-        norm_t = normalize_name(t_info['name'])
-        items = parsed_sched.get(norm_t, [])
-        seen_combos = set()
-        for item in items:
-            c_name = item['class']
-            s_name = item['subject']
-            combo_key = f"{c_name} || {s_name}"
-            if combo_key not in seen_combos:
-                seen_combos.add(combo_key)
-                official_reports_list_html += f"<tr><td><b>{t_info['name']}</b></td><td><b>{c_name}</b></td><td><b style='color:#0d47a1;'>{s_name}</b></td><td><a href='/report/official_sheet?class_name={c_name}&subject_name={s_name}&teacher_username={u}' target='_blank' style='background:#0d47a1; color:white; padding:5px 12px; border-radius:4px; text-decoration:none;'>📄 فتح التقرير الرسمي</a></td></tr>"
+    if parsed_sched:
+        for u, t_info in teachers_db.items():
+            norm_t = normalize_name(t_info['name'])
+            items = []
+            for sched_name, sched_items in parsed_sched.items():
+                if norm_t in sched_name or sched_name in norm_t or (len(norm_t.split()) > 0 and norm_t.split()[0] in sched_name):
+                    items.extend(sched_items)
+            
+            seen_combos = set()
+            for item in items:
+                c_name = item['class']
+                s_name = item['subject']
+                combo_key = f"{c_name} || {s_name}"
+                if combo_key not in seen_combos:
+                    seen_combos.add(combo_key)
+                    official_reports_list_html += f"<tr><td><b>{t_info['name']}</b></td><td><b>{c_name}</b></td><td><b style='color:#0d47a1;'>{s_name}</b></td><td><a href='/report/official_sheet?class_name={c_name}&subject_name={s_name}&teacher_username={u}' target='_blank' style='background:#0d47a1; color:white; padding:5px 12px; border-radius:4px; text-decoration:none;'>📄 فتح التقرير الرسمي</a></td></tr>"
+    if not official_reports_list_html:
+        official_reports_list_html = "<tr><td colspan='4'>لم يتم رفع البرنامج الأسبوعي أو ربط الأساتذة بالمطابقة بعد</td></tr>"
 
-    attendance_rows = "".join([f"<tr><td><b>{k}</b></td><td style='color:#c62828;'>متغيبون: {v.get('absent', [])}</td></tr>" for k, v in attendance_db.items()])
+    # تقرير حضور وغياب الطلاب المفصل حسب الصف واليوم والشهر
+    attendance_detailed_rows = ""
+    if attendance_db:
+        for key, record in attendance_db.items():
+            present_list = record.get('present', [])
+            absent_list = record.get('absent', [])
+            attendance_detailed_rows += f"""
+            <tr>
+                <td style='font-weight:bold; color:#0d47a1;'>{key}</td>
+                <td style='color:#2e7d32; font-weight:bold;'>الحاضرون ({len(present_list)}): {', '.join(present_list[:10])}{' ...' if len(present_list)>10 else ''}</td>
+                <td style='color:#c62828; font-weight:bold;'>المتغيبون ({len(absent_list)}): {', '.join(absent_list) if absent_list else 'لا يوجد غياب ✅'}</td>
+            </tr>
+            """
+    else:
+        attendance_detailed_rows = "<tr><td colspan='3' style='color:#666;'>لم يتم تسجيل أي حضور أو غياب للطلاب حتى الآن.</td></tr>"
+
     teachers_rows = "".join([f"<tr><td><b>{t['name']}</b><br><small>رقم آلي: {t.get('auto_id','')}</small></td><td><code>{u}</code></td><td><b style='color:#d32f2f;'>{t['password']}</b></td><td>{'📱 مرتبط' if t.get('mobile_device') else 'غير مسجل'}</td></tr>" for u, t in teachers_db.items()])
     
     field_rows = "".join([f"<tr><td><b>{fs['location']}</b><br><small>{fs['class_name']}</small></td><td>👤 أساسي: <b style='color:#0d47a1;'>{fs['primary_teacher']}</b><br>{'👥 مساعد: <b style=\'color:#2e7d32;\'>' + fs['secondary_teacher'] + '</b>' if fs.get('secondary_teacher') else ''}</td><td>{fs['status']}</td></tr>" for fs in reversed(field_sessions)])
@@ -817,15 +859,18 @@ def admin_dashboard():
             {% if msg %}<div style="background:#e8f5e9; color:#2e7d32; padding:12px; border-radius:6px; font-weight:bold; margin-bottom:15px;">{{ msg }}</div>{% endif %}
 
             <div id="studentAttendanceSec" class="card active">
-                <h3 style="color:#0d47a1; margin-top:0;">📋 سجل حضور وغياب الطلاب</h3>
-                <table><tr><th>الصف والتاريخ</th><th>الطلاب المتغيبون</th></tr>{{ attendance_rows | safe }}</table>
+                <h3 style="color:#0d47a1; margin-top:0;">📋 تقرير حضور وغياب الطلاب المفصل (حسب الصف، اليوم، والشهر)</h3>
+                <table>
+                    <tr><th>الصف وتاريخ السجل (اليوم والشهر)</th><th>الطلاب الحاضرون</th><th>الطلاب المتغيبون</th></tr>
+                    {{ attendance_detailed_rows | safe }}
+                </table>
             </div>
 
             <div id="studentGradesSec" class="card">
                 <h3 style="color:#0d47a1; margin-top:0;">📝 التقارير الرسمية لعلامات الطلاب (لائحة تقييم الطلاب للامتحان)</h3>
                 <table>
                     <tr><th>اسم الأستاذ</th><th>الصف والسنة</th><th>المادة التعليمية</th><th>عرض وطباعة التقرير الرسمي</th></tr>
-                    {{ official_reports_list_html | safe if official_reports_list_html else '<tr><td colspan="4">لم يتم رفع برنامج أسبوعي بعد</td></tr>' }}
+                    {{ official_reports_list_html | safe }}
                 </table>
             </div>
 
@@ -833,7 +878,7 @@ def admin_dashboard():
                 <h3 style="color:#c62828; margin-top:0;">⚠️ الأساتذة المتأخرون عن تسليم العلامات في المواد الخاصة بهم</h3>
                 <table>
                     <tr><th>اسم الأستاذ</th><th>اسم المستخدم</th><th>المواد والصفوف المتبقية ولم تُدخل لها علامة</th><th>معاينة التقرير</th></tr>
-                    {{ late_teachers_rows | safe if late_teachers_rows else '<tr><td colspan="4" style="color:#2e7d32; font-weight:bold;">جميع الأساتذة قاموا بتسليم العلامات بنجاح! 🎉</td></tr>' }}
+                    {{ late_teachers_rows | safe }}
                 </table>
             </div>
 
@@ -1033,7 +1078,7 @@ def admin_dashboard():
     </body>
     </html>
     '''
-    return render_template_string(admin_template, attendance_rows=attendance_rows, teachers_rows=teachers_rows, late_teachers_rows=late_teachers_rows, official_reports_list_html=official_reports_list_html, field_rows=field_rows, replies_html=replies_html, teacher_opts=teacher_opts, locations_opts=locations_opts, directorate_htmls=directorate_htmls, executed_hours_table_html=executed_hours_table_html, transport_table_html=transport_table_html, schedule_mapping=schedule_mapping, msg=msg)
+    return render_template_string(admin_template, attendance_detailed_rows=attendance_detailed_rows, teachers_rows=teachers_rows, late_teachers_rows=late_teachers_rows, official_reports_list_html=official_reports_list_html, field_rows=field_rows, replies_html=replies_html, teacher_opts=teacher_opts, locations_opts=locations_opts, directorate_htmls=directorate_htmls, executed_hours_table_html=executed_hours_table_html, transport_table_html=transport_table_html, schedule_mapping=schedule_mapping, msg=msg)
 
 @app.route('/teacher', methods=['GET', 'POST'])
 def teacher_dashboard():
@@ -1102,8 +1147,8 @@ def teacher_dashboard():
             students = classes_students.get(class_name, [])
             present_sts = request.form.getlist('attendance_check')
             absent_sts = [s for s in students if s not in present_sts]
-            date_key = datetime.now().strftime('%Y-%m-%d')
-            attendance_db[f"{class_name} ({date_key})"] = {'present': present_sts, 'absent': absent_sts}
+            date_key = datetime.now().strftime('%Y-%m-%d (%A)')
+            attendance_db[f"الصف: {class_name} | التاريخ: {date_key}"] = {'present': present_sts, 'absent': absent_sts}
             save_to_disk()
             msg = "تم تسجيل حضور وغياب الطلاب بنجاح!"
 
