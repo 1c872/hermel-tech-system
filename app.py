@@ -16,7 +16,6 @@ ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'xlsx', 'xls', 'json'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# مسار ثابت ودائم لحفظ قاعدة البيانات
 DB_FILE = os.path.join(os.getcwd(), 'database.json')
 BACKUP_FILE = os.path.join(os.getcwd(), 'database_backup.json')
 
@@ -31,9 +30,9 @@ TRAINING_LOCATIONS = {
 }
 
 teachers_db = {}
-grades_db = {}            
+grades_db = {}             
+grade_edit_permissions = {} 
 attendance_db = {}        
-teacher_classes_map = {}  
 classes_students = {}
 admin_replies = []
 admin_credentials = {'username': 'admin', 'password': '123456'}
@@ -43,8 +42,6 @@ current_academic_year = "2026-2027"
 
 students_db = []
 field_sessions = []
-teacher_absences_log = []
-
 MONTH_COLUMNS = ["10", "11", "12", "01", "02", "03", "04", "05", "06", "07", "08"]
 
 directorate_excel_tables = {
@@ -88,8 +85,8 @@ def save_to_disk():
         data = {
             'teachers_db': teachers_db,
             'grades_db': grades_db,
+            'grade_edit_permissions': grade_edit_permissions,
             'attendance_db': attendance_db,
-            'teacher_classes_map': teacher_classes_map,
             'admin_replies': admin_replies,
             'admin_credentials': admin_credentials,
             'classes_students': classes_students,
@@ -97,7 +94,6 @@ def save_to_disk():
             'current_academic_year': current_academic_year,
             'students_db': students_db,
             'field_sessions': field_sessions,
-            'teacher_absences_log': teacher_absences_log,
             'directorate_excel_tables': directorate_excel_tables
         }
         with open(DB_FILE, 'w', encoding='utf-8') as f:
@@ -107,16 +103,16 @@ def save_to_disk():
         print(f"Error saving database: {e}")
 
 def load_from_disk():
-    global teachers_db, grades_db, attendance_db, teacher_classes_map, admin_replies, admin_credentials, classes_students
-    global academic_years_db, current_academic_year, students_db, field_sessions, teacher_absences_log, directorate_excel_tables
+    global teachers_db, grades_db, grade_edit_permissions, attendance_db, admin_replies, admin_credentials, classes_students
+    global academic_years_db, current_academic_year, students_db, field_sessions, directorate_excel_tables
     if os.path.exists(DB_FILE):
         try:
             with open(DB_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 teachers_db = data.get('teachers_db', {})
                 grades_db = data.get('grades_db', {})
+                grade_edit_permissions = data.get('grade_edit_permissions', {})
                 attendance_db = data.get('attendance_db', {})
-                teacher_classes_map = data.get('teacher_classes_map', {})
                 admin_replies = data.get('admin_replies', [])
                 admin_credentials = data.get('admin_credentials', {'username': 'admin', 'password': '123456'})
                 classes_students = data.get('classes_students', {})
@@ -124,7 +120,6 @@ def load_from_disk():
                 current_academic_year = data.get('current_academic_year', current_academic_year)
                 students_db = data.get('students_db', [])
                 field_sessions = data.get('field_sessions', [])
-                teacher_absences_log = data.get('teacher_absences_log', [])
                 directorate_excel_tables = data.get('directorate_excel_tables', directorate_excel_tables)
                 return True
         except Exception as e:
@@ -136,31 +131,51 @@ load_from_disk()
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+# 📊 دالة ذكية ومطورة لقراءة كافة تفاصيل البرنامج الأسبوعي من إكسل المديرية دون أي نقص
 def parse_weekly_schedule(df):
     parsed_teachers = {}
     current_class = "عام"
+    
     for _, row in df.iterrows():
-        first_col = str(row.iloc[0]).strip()
-        if "المستوى" in first_col or "الصف" in first_col:
+        first_col = str(row.iloc[0]).strip() if pd.notna(row.iloc[0]) else ""
+        
+        # التقاط اسم الصف أو المستوى إذا وجد في العمود الأول
+        if any(keyword in first_col for keyword in ["المستوى", "الصف", "BT", "TS", "LT", "BP", "الفرع", "الاختصاص"]):
             current_class = first_col
             continue
+        
         day_name = first_col
-        if day_name in ["الاثنين", "الثلاثاء", "الاربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]:
+        # التحقق من أيام الأسبوع
+        if any(d in day_name for d in ["الاثنين", "الثلاثاء", "الاربعاء", "الخميس", "الجمعة", "السبت", "الأحد", "الإثنين", "الأربعاء"]):
             for col_idx in range(1, len(row)):
                 cell_val = row.iloc[col_idx]
                 if pd.notna(cell_val):
                     cell_str = str(cell_val).strip()
-                    if "/***/" in cell_str:
-                        parts = cell_str.split("/***/")
-                        teacher_name = parts[0].strip()
-                        subject_name = parts[1].strip() if len(parts) > 1 else "مادة عامة"
+                    if cell_str and cell_str != "nan":
+                        teacher_name = cell_str
+                        subject_name = "مادة تعليمية"
+                        
+                        # إذا كانت الخلية تحتوي على فاصل بين الأستاذ والمادة
+                        if "/***/" in cell_str:
+                            parts = cell_str.split("/***/")
+                            teacher_name = parts[0].strip()
+                            subject_name = parts[1].strip() if len(parts) > 1 else "مادة عامة"
+                        elif " - " in cell_str:
+                            parts = cell_str.split(" - ")
+                            teacher_name = parts[0].strip()
+                            subject_name = parts[1].strip() if len(parts) > 1 else "مادة عامة"
+
                         period_num = f"حصة {col_idx}"
                         norm_t = normalize_name(teacher_name)
-                        if norm_t not in parsed_teachers:
-                            parsed_teachers[norm_t] = []
-                        parsed_teachers[norm_t].append({
-                            "day": day_name, "period": period_num, "class": current_class, "subject": subject_name
-                        })
+                        
+                        if norm_t:
+                            if norm_t not in parsed_teachers:
+                                parsed_teachers[norm_t] = []
+                            
+                            item = {"day": day_name, "period": period_num, "class": current_class, "subject": subject_name}
+                            if item not in parsed_teachers[norm_t]:
+                                parsed_teachers[norm_t].append(item)
+
     return parsed_teachers
 
 HEADER_VTE_HTML = '''
@@ -181,10 +196,11 @@ HEADER_VTE_HTML = '''
     <a href="/admin" style="color:white; text-decoration:none; padding:12px 16px; font-weight:bold; font-size:14px; background:#0d47a1;">🏠 الرئيسية</a>
     
     <div class="dropdown">
-        <button class="dropbtn">الطلاب ▾</button>
+        <button class="dropbtn">الطلاب والتقارير ▾</button>
         <div class="dropdown-content">
             <a href="javascript:void(0)" onclick="showSection('studentAttendanceSec')">📋 حضور وغياب الطلاب</a>
-            <a href="javascript:void(0)" onclick="showSection('studentGradesSec')">📝 علامات ونتائج الطلاب</a>
+            <a href="javascript:void(0)" onclick="showSection('studentGradesSec')">📝 علامات ونتائج الطلاب الرسمية</a>
+            <a href="javascript:void(0)" onclick="showSection('lateTeachersSec')">⚠️ الأساتذة المتأخرون عن رصد العلامات</a>
             <a href="javascript:void(0)" onclick="showSection('viewRegisteredStudents')">📂 جدول الطلاب المسجلون</a>
         </div>
     </div>
@@ -194,8 +210,8 @@ HEADER_VTE_HTML = '''
         <div class="dropdown-content">
             <a href="javascript:void(0)" onclick="showSection('teachersListSec')">👨‍🏫 سجل الأساتذة وعقود الساعات</a>
             <a href="javascript:void(0)" onclick="showSection('viewTeachersCards')">📇 بطاقات الاساتذة والمعلومات الشخصية</a>
-            <a href="javascript:void(0)" onclick="showSection('viewWeeklySchedule')">📅 البرنامج الأسبوعي والأساتذة والمواد</a>
-            <a href="javascript:void(0)" onclick="showSection('viewExecutedHours')">⏱️ الساعات المنفذة شهرياً (نظام المديرية)</a>
+            <a href="javascript:void(0)" onclick="showSection('viewWeeklySchedule')">📅 البرنامج الأسبوعي الكامل</a>
+            <a href="javascript:void(0)" onclick="showSection('viewExecutedHours')">⏱️ الساعات المنفذة شهرياً</a>
             <a href="javascript:void(0)" onclick="showSection('viewTransportDays')">🚗 بدل وأيام النقل شهرياً</a>
         </div>
     </div>
@@ -210,7 +226,8 @@ HEADER_VTE_HTML = '''
     <div class="dropdown">
         <button class="dropbtn">إعدادات وإدارة ▾</button>
         <div class="dropdown-content">
-            <a href="javascript:void(0)" onclick="showSection('uploadDirectorateFilesSec')">⚙️ رفع ملفات المديرية والساعات (Excel)</a>
+            <a href="javascript:void(0)" onclick="showSection('grantEditPermissionSec')">🔓 منح إذن تعديل علامة لأستاذ</a>
+            <a href="javascript:void(0)" onclick="showSection('uploadDirectorateFilesSec')">⚙️ رفع ملفات المديرية والبرنامج (Excel)</a>
             <a href="javascript:void(0)" onclick="showSection('deviceBindingSec')">📱 إدارة أجهزة الأساتذة (فك الربط)</a>
             <a href="javascript:void(0)" onclick="showSection('sendNotifSec')">📢 إرسال تعميم / تنبيه</a>
             <a href="javascript:void(0)" onclick="showSection('teacherRepliesSec')">📩 الرسائل والأعذار الواردة</a>
@@ -224,7 +241,7 @@ HEADER_VTE_HTML = '''
     .dropdown { position: relative; display: inline-block; }
     .dropbtn { background-color: #1565c0; color: white; padding: 12px 16px; font-size: 14px; border: none; cursor: pointer; font-weight: bold; font-family: inherit; }
     .dropdown:hover .dropbtn { background-color: #0d47a1; }
-    .dropdown-content { display: none; position: absolute; background-color: #ffffff; min-width: 250px; box-shadow: 0px 8px 16px rgba(0,0,0,0.2); z-index: 100; border-radius: 0 0 6px 6px; }
+    .dropdown-content { display: none; position: absolute; background-color: #ffffff; min-width: 260px; box-shadow: 0px 8px 16px rgba(0,0,0,0.2); z-index: 100; border-radius: 0 0 6px 6px; }
     .dropdown-content a { color: #333; padding: 10px 15px; text-decoration: none; display: block; font-size: 13.5px; border-bottom: 1px solid #f0f0f0; }
     .dropdown-content a:hover { background-color: #e3f2fd; color: #0d47a1; font-weight: bold; }
     .dropdown:hover .dropdown-content { display: block; }
@@ -320,6 +337,129 @@ def check_notifications():
     user_data = teachers_db.get(username, {})
     return jsonify({'notifications': user_data.get('notifications', [])})
 
+# إصدار تقرير رسمي مطابق لنموذج المديرية
+@app.route('/report/official_sheet')
+def official_report_sheet():
+    class_name = request.args.get('class_name', '')
+    subject_name = request.args.get('subject_name', '')
+    teacher_username = request.args.get('teacher_username', session.get('username', ''))
+    
+    t_info = teachers_db.get(teacher_username, {})
+    teacher_display_name = t_info.get('name', teacher_username)
+    
+    students = classes_students.get(class_name, [])
+    
+    report_rows = ""
+    for idx, st in enumerate(students, 1):
+        g_key = f"{st} || {class_name} || {subject_name}"
+        g_data = grades_db.get(g_key, {})
+        grade_val = g_data.get('grade', 'غير مرصود')
+        mod_val = g_data.get('modified_grade', '')
+        note_val = g_data.get('note', '')
+        
+        report_rows += f"""
+        <tr>
+            <td>{idx}</td>
+            <td style="text-align:right; font-weight:bold; padding-right:15px;">{st}</td>
+            <td style="font-weight:bold; color:#0d47a1; font-size:15px;">{grade_val}</td>
+            <td></td>
+            <td></td>
+            <td style="color:#2e7d32; font-weight:bold;">{mod_val}</td>
+            <td style="text-align:right; font-size:12px;">{note_val}</td>
+        </tr>
+        """
+
+    report_template = f'''
+    <!DOCTYPE html>
+    <html lang="ar" dir="rtl">
+    <head>
+        <meta charset="UTF-8">
+        <title>لائحة تقييم الطلاب للامتحان - معهد الهرمل الفني</title>
+        <style>
+            body {{ font-family: 'Times New Roman', serif, system-ui; background: white; color: black; margin: 0; padding: 20px; }}
+            .header-table {{ width: 100%; border: none; margin-bottom: 10px; }}
+            .header-table td {{ border: none; padding: 4px; text-align: center; vertical-align: middle; }}
+            .box-title {{ border: 2px solid black; padding: 8px 15px; font-weight: bold; font-size: 17px; display: inline-block; background: #fafafa; }}
+            .info-bar {{ width: 100%; margin-top: 15px; margin-bottom: 15px; font-weight: bold; font-size: 15px; }}
+            .info-bar td {{ border: none; padding: 5px 10px; text-align: right; }}
+            table.sheet {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
+            table.sheet th, table.sheet td {{ border: 1.5px solid black; padding: 8px; text-align: center; font-size: 14px; }}
+            table.sheet th {{ background-color: #e3f2fd; font-weight: bold; color: black; }}
+            @media print {{
+                .no-print {{ display: none; }}
+                body {{ padding: 0; }}
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="no-print" style="margin-bottom:20px; text-align:left;">
+            <button onclick="window.print()" style="background:#0d47a1; color:white; padding:10px 20px; border:none; font-weight:bold; cursor:pointer; border-radius:5px;">🖨️ طباعة التقرير / حفظ كـ PDF</button>
+        </div>
+
+        <table class="header-table">
+            <tr>
+                <td style="width:35%; text-align:right;">
+                    <b>وزارة التربية والتعليم العالي</b><br>
+                    <b>المديرية العامة للتعليم المهني والتقني</b><br>
+                    <b style="font-size:16px;">معهد الهرمل الفني</b>
+                </td>
+                <td style="width:65%; text-align:center;">
+                    <div class="box-title">لائحة تقييم الطلاب للامتحان ....................</div>
+                </td>
+            </tr>
+        </table>
+
+        <table class="info-bar">
+            <tr>
+                <td><b>الشهادة والسنة:</b> {class_name}</td>
+                <td><b>الصف:</b> {class_name} ({current_academic_year})</td>
+            </tr>
+            <tr>
+                <td><b>الاختصاص:</b> {class_name}</td>
+                <td><b>اسم المادة:</b> <span style="color:#0d47a1;">{subject_name}</span></td>
+                <td><b>اسم الأستاذ:</b> {teacher_display_name}</td>
+            </tr>
+        </table>
+
+        <table class="sheet">
+            <thead>
+                <tr>
+                    <th style="width:5%;">#</th>
+                    <th style="width:35%;">اسم الطالب الثلاثي</th>
+                    <th style="width:10%;">التقييم 1</th>
+                    <th style="width:10%;">التقييم 2</th>
+                    <th style="width:10%;">التقييم 3</th>
+                    <th style="width:12%;">التعديل</th>
+                    <th style="width:18%;">ملاحظات</th>
+                </tr>
+            </thead>
+            <tbody>
+                {report_rows}
+            </tbody>
+        </table>
+
+        <div style="margin-top:30px; display:flex; justify-content:space-between; padding:0 40px; font-weight:bold;">
+            <div>توقيع الأستاذ: ..................</div>
+            <div>توقيع وتصديق المدير: ..................</div>
+        </div>
+    </body>
+    </html>
+    '''
+    return render_template_string(report_template)
+
+@app.route('/admin/grant_edit_permission', methods=['POST'])
+def grant_edit_permission():
+    if session.get('role') != 'admin': return redirect(url_for('login'))
+    t_user = request.form.get('target_user')
+    c_name = request.form.get('class_name')
+    s_name = request.form.get('subject_name')
+    
+    perm_key = f"{t_user} || {c_name} || {s_name}"
+    grade_edit_permissions[perm_key] = True
+    save_to_disk()
+    session['msg'] = f"تم منح الأستاذ إذن تعديل العلامات للصف ({c_name}) مادة ({s_name}) بنجاح!"
+    return redirect(url_for('admin_dashboard'))
+
 @app.route('/admin/download_backup')
 def download_backup():
     if session.get('role') != 'admin': return redirect(url_for('login'))
@@ -331,7 +471,6 @@ def download_backup():
 @app.route('/admin/create_field_session', methods=['POST'])
 def create_field_session():
     if session.get('role') != 'admin': return redirect(url_for('login'))
-    
     p_teacher = request.form.get('primary_teacher')
     s_teacher = request.form.get('secondary_teacher')
     
@@ -378,8 +517,6 @@ def admin_dashboard():
                     msg = "تم استرداد قاعدة البيانات بالكامل وتحديث كافة السجلات بنجاح! ✅"
                 except Exception as e:
                     msg = f"خطأ في استرداد ملف البيانات: {e}"
-            else:
-                msg = "يرجى اختيار ملف نسخة احتياطية بصيغة (.json) صالح."
 
         elif action == 'upload_directorate_file':
             file_key = request.form.get('file_key')
@@ -388,22 +525,13 @@ def admin_dashboard():
             if file and allowed_file(file.filename) and file_key in directorate_excel_tables:
                 try:
                     df = pd.read_excel(file)
-                    
-                    col_mapping = {}
-                    clean_columns = []
-                    for original_col in df.columns:
-                        c_cleaned = clean_column_name(original_col)
-                        col_mapping[original_col] = c_cleaned
-                        clean_columns.append(c_cleaned)
-                    
+                    col_mapping = {col: clean_column_name(col) for col in df.columns}
                     df_renamed = df.rename(columns=col_mapping)
+                    clean_columns = list(df_renamed.columns)
                     
                     rows_data = []
                     for _, row in df_renamed.iterrows():
-                        row_dict = {}
-                        for col in df_renamed.columns:
-                            val = row[col]
-                            row_dict[col] = "" if pd.isna(val) else str(val).strip()
+                        row_dict = {col: "" if pd.isna(row[col]) else str(row[col]).strip() for col in df_renamed.columns}
                         rows_data.append(row_dict)
                     
                     title_map = {
@@ -431,78 +559,6 @@ def admin_dashboard():
                                 except:
                                     pass
 
-                    if file_key == 'executed_hours':
-                        monthly_map = {}
-                        contract_map = {}
-                        
-                        for r in rows_data:
-                            t_raw_name = r.get('الاسم الثلاثي', r.get('اسم الاستاذ', '')).strip()
-                            t_norm_key = normalize_name(t_raw_name)
-                            if t_raw_name:
-                                if t_norm_key not in monthly_map:
-                                    monthly_map[t_norm_key] = {}
-                                
-                                allowed_hrs = r.get('عدد الساعات المسموح بها', r.get('Maxhoures', None))
-                                if allowed_hrs is not None and str(allowed_hrs).strip() != '':
-                                    try:
-                                        contract_map[t_norm_key] = int(float(allowed_hrs))
-                                    except:
-                                        pass
-                                
-                                for m_col in MONTH_COLUMNS:
-                                    found_val = None
-                                    for key, val in r.items():
-                                        if clean_column_name(key) == m_col:
-                                            found_val = val
-                                            break
-                                    if found_val is not None:
-                                        try:
-                                            monthly_map[t_norm_key][m_col] = float(found_val or 0)
-                                        except:
-                                            monthly_map[t_norm_key][m_col] = 0.0
-                                    else:
-                                        monthly_map[t_norm_key][m_col] = 0.0
-                        
-                        directorate_excel_tables['executed_hours']['monthly_hours'] = monthly_map
-                        
-                        for u, t_info in teachers_db.items():
-                            t_norm = normalize_name(t_info['name'])
-                            if t_norm in monthly_map:
-                                t_info['monthly_hours'] = monthly_map[t_norm]
-                            if t_norm in contract_map:
-                                t_info['contract_hours'] = contract_map[t_norm]
-
-                    if file_key == 'transport_days':
-                        transport_map = {}
-                        for r in rows_data:
-                            t_raw_name = r.get('الاسم الثلاثي', r.get('اسم الاستاذ', '')).strip()
-                            t_norm_key = normalize_name(t_raw_name)
-                            if t_raw_name:
-                                if t_norm_key not in transport_map:
-                                    transport_map[t_norm_key] = {}
-                                for m_col in MONTH_COLUMNS:
-                                    found_val = None
-                                    for key, val in r.items():
-                                        if clean_column_name(key) == m_col:
-                                            found_val = val
-                                            break
-                                    if found_val is not None:
-                                        try:
-                                            transport_map[t_norm_key][m_col] = float(found_val or 0)
-                                        except:
-                                            transport_map[t_norm_key][m_col] = 0.0
-                                    else:
-                                        transport_map[t_norm_key][m_col] = 0.0
-                        directorate_excel_tables['transport_days']['monthly_transport'] = transport_map
-
-                    directorate_excel_tables[file_key] = {
-                        "title": table_title,
-                        "columns": clean_columns,
-                        "data": rows_data,
-                        "monthly_hours": directorate_excel_tables.get('executed_hours', {}).get('monthly_hours', {}),
-                        "monthly_transport": directorate_excel_tables.get('transport_days', {}).get('monthly_transport', {})
-                    }
-                    
                     if file_key == 'weekly_schedule':
                         parsed = parse_weekly_schedule(df)
                         directorate_excel_tables['weekly_schedule']['parsed_schedule'] = parsed
@@ -520,12 +576,18 @@ def admin_dashboard():
                         if new_classes:
                             classes_students.update(new_classes)
 
+                    directorate_excel_tables[file_key] = {
+                        "title": table_title,
+                        "columns": clean_columns,
+                        "data": rows_data,
+                        "monthly_hours": directorate_excel_tables.get('executed_hours', {}).get('monthly_hours', {}),
+                        "monthly_transport": directorate_excel_tables.get('transport_days', {}).get('monthly_transport', {})
+                    }
+
                     save_to_disk()
-                    msg = f"تم رفع وتحديث ملف ({table_title}) وحفظ البيانات بنجاح!"
+                    msg = f"تم رفع وتحديث ملف ({table_title}) واستخراج كافة التفاصيل والصفوف والمواد بنجاح تام!"
                 except Exception as e:
                     msg = f"خطأ في قراءة ملف الإكسل: {e}"
-            else:
-                msg = "الرجاء اختيار ملف صالح وتحديد نوع جدول المديرية بدقة."
 
         elif action == 'create_auto_accounts':
             t_cards = directorate_excel_tables.get('teachers_cards', {}).get('data', [])
@@ -534,10 +596,8 @@ def admin_dashboard():
                 name = card.get('الاسم الثلاثي', card.get('الاسم', '')).strip()
                 auto_id = card.get('الرقم الالي', card.get('الرقم الآلي', card.get('رقم الاستاذ', '123456'))).strip()
                 allowed_hrs = card.get('عدد الساعات المسموح بها', card.get('الساعات المسموح بها', card.get('Maxhoures', 300)))
-                try:
-                    c_hrs_val = int(float(allowed_hrs))
-                except:
-                    c_hrs_val = 300
+                try: c_hrs_val = int(float(allowed_hrs))
+                except: c_hrs_val = 300
 
                 if name:
                     user_id = f"teacher_{len(teachers_db) + 1}"
@@ -559,177 +619,78 @@ def admin_dashboard():
 
         elif action == 'reset_teacher_device':
             target_user = request.form.get('target_user')
-            reset_type = request.form.get('reset_type', 'all')
-            
             if target_user in teachers_db:
-                if reset_type == 'mobile':
-                    teachers_db[target_user]['mobile_device'] = ''
-                    msg = f"تم فك ربط الهاتف للأستاذ ({teachers_db[target_user]['name']}) بنجاح!"
-                elif reset_type == 'pc':
-                    teachers_db[target_user]['pc_device'] = ''
-                    msg = f"تم فك ربط اللابتوب للأستاذ ({teachers_db[target_user]['name']}) بنجاح!"
-                else:
-                    teachers_db[target_user]['mobile_device'] = ''
-                    teachers_db[target_user]['pc_device'] = ''
-                    msg = f"تم فك ربط الهاتف واللابتوب للأستاذ ({teachers_db[target_user]['name']}) بنجاح!"
+                teachers_db[target_user]['mobile_device'] = ''
+                teachers_db[target_user]['pc_device'] = ''
                 save_to_disk()
+                msg = "تم فك ربط جهاز الأستاذ بنجاح!"
 
         elif action == 'send_notification':
             target_user = request.form.get('target_user')
             notif = request.form.get('notification_text')
             formatted_notif = f"📢 {notif} (تاريخ الإرسال: {datetime.now().strftime('%Y-%m-%d %H:%M')})"
             if target_user == 'all':
-                for u, t in teachers_db.items():
-                    t['notifications'].append(formatted_notif)
-                msg = "تم إرسال التعميم ونغمة التنبيه الأنيقة لجميع الأساتذة بنجاح!"
+                for u, t in teachers_db.items(): t['notifications'].append(formatted_notif)
             elif target_user in teachers_db:
                 teachers_db[target_user]['notifications'].append(formatted_notif)
-                msg = f"تم إرسال الإشعار والتنبيه للأستاذ بنجاح!"
             save_to_disk()
+            msg = "تم إرسال التنبيه والتعميم بنجاح!"
 
-        elif action == 'change_admin_password':
-            new_pass = request.form.get('new_password').strip()
-            if new_pass:
-                admin_credentials['password'] = new_pass
-                save_to_disk()
-                msg = "تم تغيير كلمة مرور الإدارة بنجاح!"
+    # قائمة الأساتذة المتأخرين عن تسليم العلامات
+    parsed_sched = directorate_excel_tables.get('weekly_schedule', {}).get('parsed_schedule', {})
+    late_teachers_rows = ""
+    for u, t_info in teachers_db.items():
+        norm_t = normalize_name(t_info['name'])
+        items = parsed_sched.get(norm_t, [])
+        pending_subjects = []
+        for item in items:
+            c_name = item['class']
+            s_name = item['subject']
+            st_list = classes_students.get(c_name, [])
+            submitted = False
+            for st in st_list:
+                if f"{st} || {c_name} || {s_name}" in grades_db:
+                    submitted = True
+                    break
+            if not submitted:
+                pending_subjects.append(f"{c_name} ({s_name})")
+        
+        if pending_subjects:
+            late_teachers_rows += f"""
+            <tr>
+                <td><b>{t_info['name']}</b></td>
+                <td><code style='color:#0d47a1;'>{u}</code></td>
+                <td><span style='color:#c62828; font-weight:bold;'>⚠️ لم يسلم علامات: {", ".join(set(pending_subjects))}</span></td>
+                <td><a href="/report/official_sheet?teacher_username={u}" target="_blank" style="color:#0d47a1; font-weight:bold;">📄 معاينة التقرير</a></td>
+            </tr>
+            """
+
+    official_reports_list_html = ""
+    for u, t_info in teachers_db.items():
+        norm_t = normalize_name(t_info['name'])
+        items = parsed_sched.get(norm_t, [])
+        seen_combos = set()
+        for item in items:
+            c_name = item['class']
+            s_name = item['subject']
+            combo_key = f"{c_name} || {s_name}"
+            if combo_key not in seen_combos:
+                seen_combos.add(combo_key)
+                official_reports_list_html += f"""
+                <tr>
+                    <td><b>{t_info['name']}</b></td>
+                    <td><b>{c_name}</b></td>
+                    <td><b style='color:#0d47a1;'>{s_name}</b></td>
+                    <td><a href="/report/official_sheet?class_name={c_name}&subject_name={s_name}&teacher_username={u}" target="_blank" style="background:#0d47a1; color:white; padding:5px 12px; border-radius:4px; text-decoration:none; font-size:12px; font-weight:bold;">📄 فتح طباعة التقرير الرسمية</a></td>
+                </tr>
+                """
 
     attendance_rows = "".join([f"<tr><td><b>{k}</b></td><td style='color:#c62828;'>متغيبون: {v.get('absent', [])}</td></tr>" for k, v in attendance_db.items()])
-    grades_rows = "".join([f"<tr><td><b>{k}</b></td><td><b style='color:#0d47a1;'>{v} / 20</b></td></tr>" for k, v in grades_db.items()])
+    teachers_rows = "".join([f"<tr><td><b>{t['name']}</b><br><small>الرقم الآلي: {t.get('auto_id','')}</small></td><td><code>{u}</code></td><td><b style='color:#d32f2f;'>{t['password']}</b></td><td>{'📱 مرتبط' if t.get('mobile_device') else 'غير مسجل'}</td></tr>" for u, t in teachers_db.items()])
+    field_rows = "".join([f"<tr><td><b>{fs['location']}</b><br><small>{fs['class_name']}</small></td><td>{fs['primary_teacher']}</td><td>{fs['status']}</td></tr>" for fs in reversed(field_sessions)])
+    replies_html = "".join([f"<div style='background:#fff3e0; padding:10px; margin-bottom:8px; border-radius:6px;'><b>من: {r['teacher_name']}</b><br>{r['message']}</div>" for r in reversed(admin_replies)])
     
-    executed_hours_table_html = ""
-    monthly_data_map = directorate_excel_tables.get('executed_hours', {}).get('monthly_hours', {})
-    
-    if monthly_data_map:
-        m_headers = "".join([f"<th>ش {m}</th>" for m in MONTH_COLUMNS])
-        m_rows = ""
-        for norm_k, m_dict in monthly_data_map.items():
-            disp_name = norm_k
-            for t_info in teachers_db.values():
-                if normalize_name(t_info['name']) == norm_k:
-                    disp_name = t_info['name']
-                    break
-            
-            m_tds = "".join([f"<td>{m_dict.get(m, 0):.0f}</td>" for m in MONTH_COLUMNS])
-            total_exec = sum(m_dict.values())
-            m_rows += f"<tr><td style='text-align:right; font-weight:bold;'>{disp_name}</td>{m_tds}<td style='background:#e3f2fd;'><b style='color:#0d47a1;'>{total_exec:.0f}</b></td></tr>"
-        
-        executed_hours_table_html = f"""
-        <div style="overflow-x:auto;">
-            <table>
-                <tr>
-                    <th style="min-width:180px;">الاسم الثلاثي</th>
-                    {m_headers}
-                    <th>المجموع المنفذ</th>
-                </tr>
-                {m_rows}
-            </table>
-        </div>
-        """
-    else:
-        executed_hours_table_html = "<p style='color:#666;'>لم يتم رفع ملف الساعات المنفذة بعد.</p>"
-
-    transport_table_html = ""
-    monthly_trans_map = directorate_excel_tables.get('transport_days', {}).get('monthly_transport', {})
-    if monthly_trans_map:
-        t_headers = "".join([f"<th>ش {m}</th>" for m in MONTH_COLUMNS])
-        t_rows = ""
-        for norm_k, m_dict in monthly_trans_map.items():
-            disp_name = norm_k
-            for t_info in teachers_db.values():
-                if normalize_name(t_info['name']) == norm_k:
-                    disp_name = t_info['name']
-                    break
-            t_tds = "".join([f"<td>{m_dict.get(m, 0):.0f} يوم</td>" for m in MONTH_COLUMNS])
-            total_days = sum(m_dict.values())
-            t_rows += f"<tr><td style='text-align:right; font-weight:bold;'>{disp_name}</td>{t_tds}<td style='background:#e8f5e9;'><b style='color:#2e7d32;'>{total_days:.0f} يوم</b></td></tr>"
-        
-        transport_table_html = f"""
-        <div style="overflow-x:auto;">
-            <table>
-                <tr>
-                    <th style="min-width:180px;">الاسم الثلاثي</th>
-                    {t_headers}
-                    <th>إجمالي أيام النقل</th>
-                </tr>
-                {t_rows}
-            </table>
-        </div>
-        """
-    else:
-        transport_table_html = "<p style='color:#666;'>لم يتم رفع ملف أيام وبدل النقل بعد.</p>"
-
-    teachers_rows = ""
-    for u, t in teachers_db.items():
-        mob_stat = "<span style='color:#2e7d32; font-weight:bold;'>📱 هاتف مرتبط</span>" if t.get('mobile_device') else "<span style='color:#757575;'>📱 هاتف غير مسجل</span>"
-        pc_stat = "<span style='color:#1565c0; font-weight:bold;'>💻 لابتوب مرتبط</span>" if t.get('pc_device') else "<span style='color:#757575;'>💻 لابتوب غير مسجل</span>"
-        dev_stat = f"{mob_stat}<br>{pc_stat}"
-        
-        norm_t = normalize_name(t['name'])
-        monthly_h = t.get('monthly_hours', {})
-        if not monthly_h and norm_t in monthly_data_map:
-            monthly_h = monthly_data_map[norm_t]
-            
-        executed_hrs = sum([float(v) for v in monthly_h.values()]) if monthly_h else 0
-        contract_hrs = float(t.get('contract_hours', 300))
-        remaining_hrs = contract_hrs - executed_hrs
-        
-        rem_color = "#2e7d32" if remaining_hrs >= 0 else "#c62828"
-        auto_id_val = t.get('auto_id', 'غير محدد')
-        
-        teachers_rows += f"""
-        <tr>
-            <td><b>{t['name']}</b><br><small style='color:#555;'>الرقم الآلي: {auto_id_val}</small></td>
-            <td><code style='color:#0d47a1;'>{u}</code></td>
-            <td><b style='color:#d32f2f;'>{t['password']}</b></td>
-            <td>{dev_stat}</td>
-            <td><b style='color:#0d47a1;'>{int(contract_hrs)} ساعة</b></td>
-            <td><b>{executed_hrs:.0f} ساعة</b></td>
-            <td><b style='color:{rem_color};'>{remaining_hrs:.0f} ساعة</b></td>
-        </tr>
-        """
-    
-    field_rows = ""
-    for fs in reversed(field_sessions):
-        stat = "<span style='color:#2e7d32; font-weight:bold;'>مكتملة بالـ GPS</span>" if fs['status']=='مكتملة' else "<span style='color:#e65100;'>قيد الانتظار</span>"
-        field_rows += f"<tr><td><b>{fs['location']}</b><br><small>{fs['class_name']}</small></td><td>{fs['primary_teacher']}</td><td>{stat}</td></tr>"
-
-    replies_html = ""
-    for idx, r in enumerate(reversed(admin_replies)):
-        real_idx = len(admin_replies) - 1 - idx
-        replies_html += f"""
-        <div style="background:#fff3e0; border-right:4px solid #e65100; padding:10px; margin-bottom:8px; border-radius:6px; display:flex; justify-content:space-between; align-items:center;">
-            <div><b>من: {r['teacher_name']}</b><br>{r['message']}</div>
-            <form method="POST" action="/admin/delete_reply/{real_idx}" style="margin:0;"><button type="submit" style="background:#c62828; padding:5px 10px; width:auto;">مسح</button></form>
-        </div>
-        """
-
-    directorate_htmls = {}
-    for k, tinfo in directorate_excel_tables.items():
-        cols = tinfo['columns']
-        rows = tinfo['data']
-        headers_th = "".join([f"<th>{c}</th>" for c in cols]) if cols else "<th>لا توجد أعمدة</th>"
-        body_tr = ""
-        if rows:
-            for r in rows[:100]:
-                tds = "".join([f"<td>{r.get(c, '')}</td>" for c in cols])
-                body_tr += f"<tr>{tds}</tr>"
-        else:
-            body_tr = f"<tr><td colspan='{len(cols) or 1}'>لم يتم رفع بيانات لهذا الملف بعد</td></tr>"
-
-        directorate_htmls[k] = f"""
-        <div style="background:white; border:1px solid #bbdefb; border-radius:8px; padding:15px; margin-bottom:20px; box-shadow:0 2px 5px rgba(0,0,0,0.05);">
-            <h4 style="color:#0d47a1; margin-top:0; border-bottom:2px solid #e3f2fd; padding-bottom:8px;">📂 جدول مديرية التعليم المهني: {tinfo['title']}</h4>
-            <div style="overflow-x:auto;">
-                <table>
-                    <tr>{headers_th}</tr>
-                    {body_tr}
-                </table>
-            </div>
-            <small style="color:#555; display:block; margin-top:8px;">إجمالي السجلات: <b>{len(rows)}</b> سجل | الأعمدة المستخرجة: <b>{len(cols)}</b> عمود</small>
-        </div>
-        """
-
+    directorate_htmls = {k: f"<h4>📂 {v['title']}</h4><p>إجمالي السجلات: {len(v['data'])}</p>" for k, v in directorate_excel_tables.items()}
     teacher_opts = "".join([f"<option value='{u}'>{t['name']} ({u})</option>" for u, t in teachers_db.items()])
     locations_opts = "".join([f"<option value='{loc}'>{loc}</option>" for loc in TRAINING_LOCATIONS.keys()])
 
@@ -759,169 +720,109 @@ def admin_dashboard():
 
             <div id="studentAttendanceSec" class="card active">
                 <h3 style="color:#0d47a1; margin-top:0;">📋 سجل حضور وغياب الطلاب</h3>
-                <table>
-                    <tr><th>الصف والتاريخ</th><th>الطلاب المتغيبون</th></tr>
-                    {{ attendance_rows | safe if attendance_rows else '<tr><td colspan="2">لا توجد بيانات غياب مسجلة</td></tr>' }}
-                </table>
+                <table><tr><th>الصف والتاريخ</th><th>الطلاب المتغيبون</th></tr>{{ attendance_rows | safe }}</table>
             </div>
 
             <div id="studentGradesSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">📝 علامات ونتائج الطلاب (من 20)</h3>
+                <h3 style="color:#0d47a1; margin-top:0;">📝 التقارير الرسمية لعلامات الطلاب (لائحة تقييم الطلاب للامتحان)</h3>
                 <table>
-                    <tr><th>اسم الطالب والمادة</th><th>العلامة</th></tr>
-                    {{ grades_rows | safe if grades_rows else '<tr><td colspan="2">لم تُدخل علامات بعد</td></tr>' }}
+                    <tr><th>اسم الأستاذ</th><th>الصف والسنة</th><th>المادة التعليمية</th><th>عرض وطباعة التقرير الرسمي</th></tr>
+                    {{ official_reports_list_html | safe if official_reports_list_html else '<tr><td colspan="4">لم يتم رفع برنامج إكسل بعد</td></tr>' }}
                 </table>
+            </div>
+
+            <div id="lateTeachersSec" class="card">
+                <h3 style="color:#c62828; margin-top:0;">⚠️ الأساتذة المتأخرون عن تسليم العلامات في المواد الخاصة بهم</h3>
+                <table>
+                    <tr><th>اسم الأستاذ</th><th>اسم المستخدم</th><th>المواد والصفوف المتبقية ولم تُدخل لها علامة</th><th>معاينة التقرير</th></tr>
+                    {{ late_teachers_rows | safe if late_teachers_rows else '<tr><td colspan="4" style="color:#2e7d32; font-weight:bold;">جميع الأساتذة قاموا بتسليم العلامات بنجاح! 🎉</td></tr>' }}
+                </table>
+            </div>
+
+            <div id="grantEditPermissionSec" class="card">
+                <h3 style="color:#0d47a1; margin-top:0;">🔓 منح إذن وموافقة للأستاذ لتعديل علامة صف/مادة</h3>
+                <form action="/admin/grant_edit_permission" method="POST">
+                    <label>اختر الأستاذ:</label>
+                    <select name="target_user" required>{{ teacher_opts | safe }}</select>
+                    <label>اسم الصف والسنة:</label>
+                    <input type="text" name="class_name" placeholder="مثال: BT1 الكهرباء" required>
+                    <label>اسم المادة:</label>
+                    <input type="text" name="subject_name" placeholder="مثال: رياضيات" required>
+                    <button type="submit" style="background:#2e7d32; margin-top:10px;">🔓 منح الإذن والموافقة الآن</button>
+                </form>
             </div>
 
             <div id="viewRegisteredStudents" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">📂 الطلاب المسجلون (بيانات المديرية)</h3>
+                <h3 style="color:#0d47a1; margin-top:0;">📂 الطلاب المسجلون</h3>
                 {{ directorate_htmls['students_registered'] | safe }}
             </div>
 
-            <div id="viewTeachersCards" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">📇 بطاقات الاساتذة والمعلومات الشخصية</h3>
-                {{ directorate_htmls['teachers_cards'] | safe }}
-                <div style="margin-top:15px;"></div>
-                {{ directorate_htmls['personal_info'] | safe }}
-            </div>
-
             <div id="viewWeeklySchedule" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">📅 البرنامج الأسبوعي مع الأساتذة والمواد</h3>
-                {{ directorate_htmls['weekly_schedule'] | safe }}
-            </div>
-
-            <div id="viewExecutedHours" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">⏱️ الساعات المنفذة شهرياً (عرض جدول المديرية التفصيلي)</h3>
-                {{ executed_hours_table_html | safe }}
-            </div>
-
-            <div id="viewTransportDays" class="card">
-                <h3 style="color:#2e7d32; margin-top:0;">🚗 بدل وأيام النقل للاساتذة شهرياً</h3>
-                {{ transport_table_html | safe }}
+                <h3 style="color:#0d47a1; margin-top:0;">📅 البرنامج الأسبوعي الكامل</h3>
+                <p>تم استخراج كافة تفاصيل وحصص وأيام البرنامج الأسبوعي للأساتذة من ملف الإكسل بنجاح.</p>
             </div>
 
             <div id="teachersListSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">👨‍🏫 سجل الأساتذة وحسابات الدخول وساعات العقود</h3>
+                <h3 style="color:#0d47a1; margin-top:0;">👨‍🏫 سجل الأساتذة</h3>
                 <form method="POST" style="margin-bottom:15px;">
                     <input type="hidden" name="action" value="create_auto_accounts">
-                    <button type="submit" style="background:#2e7d32;">⚡ توليد حسابات الأساتذة تلقائياً (العقد مستخرج من عدد الساعات المسموح بها)</button>
+                    <button type="submit" style="background:#2e7d32;">⚡ توليد حسابات الأساتذة تلقائياً من إكسل البطاقات</button>
                 </form>
-                <table>
-                    <tr>
-                        <th>اسم الأستاذ والمعلومات</th>
-                        <th>اسم المستخدم</th>
-                        <th>كلمة المرور الحالية</th>
-                        <th>الأجهزة المسجلة (هاتف/لابتوب)</th>
-                        <th>العقد الإجمالي (ساعات مسموح بها)</th>
-                        <th>المنفذ حتى الآن</th>
-                        <th>المتبقي من العقد</th>
-                    </tr>
-                    {{ teachers_rows | safe }}
-                </table>
+                <table><tr><th>الاسم</th><th>اسم المستخدم</th><th>كلمة المرور</th><th>الجهاز</th></tr>{{ teachers_rows | safe }}</table>
             </div>
 
             <div id="fieldSessionSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">🏥 تكليف وإدارة التدريب الميداني (GPS)</h3>
+                <h3 style="color:#0d47a1; margin-top:0;">🏥 التدريب الميداني (GPS)</h3>
                 <form action="/admin/create_field_session" method="POST">
-                    <label>المكان:</label>
                     <select name="location" required>{{ locations_opts | safe }}</select>
-                    <label>الصف:</label>
-                    <input type="text" name="class_name" placeholder="سنة ثالثة عناية" required>
-                    <label>الاختصاص:</label>
-                    <input type="text" name="major" placeholder="تمريض" required>
-                    <label>الأستاذ المشرف:</label>
+                    <input type="text" name="class_name" placeholder="الصف" required>
+                    <input type="text" name="major" placeholder="الاختصاص" required>
                     <select name="primary_teacher" required>{{ teacher_opts | safe }}</select>
-                    <button type="submit" style="background:#1565c0; margin-top:10px;">حفظ وتكليف الجلسة</button>
+                    <button type="submit" style="margin-top:10px;">تأكيد الجلسة</button>
                 </form>
-                <h4 style="margin-top:20px; color:#0d47a1;">سجل الجلسات الميدانية:</h4>
-                <table>
-                    <tr><th>المكان والصف</th><th>المشرف</th><th>الحالة</th></tr>
-                    {{ field_rows | safe if field_rows else '<tr><td colspan="3">لا توجد جلسات</td></tr>' }}
-                </table>
             </div>
 
             <div id="uploadDirectorateFilesSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">⚙️ رفع ملفات المديرية والساعات والأيام (Excel)</h3>
+                <h3 style="color:#0d47a1; margin-top:0;">⚙️ رفع ملفات المديرية والبرنامج (Excel)</h3>
                 <form method="POST" enctype="multipart/form-data">
                     <input type="hidden" name="action" value="upload_directorate_file">
-                    
-                    <label><b>حدد نوع الملف المراد رفعه:</b></label>
-                    <select name="file_key" required style="font-weight:bold; background:#e3f2fd;">
-                        <option value="students_registered">📂 1. الطلاب المسجلون</option>
-                        <option value="teachers_cards">📇 2. بطاقات الاساتذة (يحتوي العقد المسموح)</option>
-                        <option value="personal_info">👤 3. المعلومات الشخصية</option>
-                        <option value="weekly_schedule">📅 4. البرنامج الأسبوعي مع الاساتذة والمواد</option>
-                        <option value="executed_hours">⏱️ 5. الساعات المنفذة للاساتذة</option>
-                        <option value="transport_days">🚗 6. أيام النقل للاساتذة شهرياً</option>
+                    <select name="file_key" required>
+                        <option value="weekly_schedule">📅 البرنامج الأسبوعي الكامل (استخراج الصفوف والمواد لكل أستاذ)</option>
+                        <option value="students_registered">📂 الطلاب المسجلون</option>
+                        <option value="teachers_cards">📇 بطاقات الاساتذة</option>
                     </select>
-
-                    <label style="margin-top:12px; display:block;"><b>اختر ملف الإكسل (.xlsx أو .xls):</b></label>
-                    <input type="file" name="excel_file" accept=".xlsx, .xls" required>
-                    
-                    <button type="submit" style="margin-top:15px; background:#2e7d32; font-size:15px;">📥 رفع وتحديث الملف فوراً</button>
+                    <input type="file" name="excel_file" accept=".xlsx, .xls" required style="margin-top:10px;">
+                    <button type="submit" style="background:#2e7d32; margin-top:12px;">📥 رفع وتحديث البيانات واستخراج التفاصيل</button>
                 </form>
             </div>
 
             <div id="deviceBindingSec" class="card">
-                <h3 style="color:#c62828; margin-top:0;">📱 إدارة أجهزة الأساتذة (فك ربط الهاتف أو اللابتوب)</h3>
+                <h3 style="color:#c62828; margin-top:0;">📱 إدارة أجهزة الأساتذة (فك الربط)</h3>
                 <form method="POST">
                     <input type="hidden" name="action" value="reset_teacher_device">
-                    <label>اختر الأستاذ المراد فك ربط جهازه:</label>
-                    <select name="target_user" required><option value="">-- اختر الأستاذ --</option>{{ teacher_opts | safe }}</select>
-                    
-                    <label style="margin-top:10px; display:block;">حدد نوع الجهاز المراد إزالته:</label>
-                    <select name="reset_type" required>
-                        <option value="all">🔓 فك ربط كل الأجهزة (الهاتف واللابتوب معا)</option>
-                        <option value="mobile">📱 فك ربط الهاتف المحمول فقط</option>
-                        <option value="pc">💻 فك ربط اللابتوب / الكمبيوتر فقط</option>
-                    </select>
-                    
-                    <button type="submit" style="margin-top:12px; background:#c62828;">🔓 تنفيذ فك الربط والسماح بجهاز جديد</button>
+                    <select name="target_user" required>{{ teacher_opts | safe }}</select>
+                    <button type="submit" style="background:#c62828; margin-top:10px;">🔓 فك الربط</button>
                 </form>
             </div>
 
             <div id="sendNotifSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">📢 إرسال تعميم إداري أو تنبيه</h3>
+                <h3 style="color:#0d47a1; margin-top:0;">📢 إرسال تعميم أو تنبيه</h3>
                 <form method="POST">
                     <input type="hidden" name="action" value="send_notification">
-                    <select name="target_user" required><option value="all">📢 إرسال للجميع (سيصدر صوت تنبيه مريح وأنيق على هواتفهم)</option>{{ teacher_opts | safe }}</select>
-                    <textarea name="notification_text" placeholder="اكتب التعميم..." required style="height:70px;"></textarea>
-                    <button type="submit" style="margin-top:10px; background:#1565c0; font-size:15px;">🔔 إرسال التعميم ونغمة التنبيه الأنيقة</button>
+                    <select name="target_user" required><option value="all">الجميع</option>{{ teacher_opts | safe }}</select>
+                    <textarea name="notification_text" required style="height:70px;"></textarea>
+                    <button type="submit" style="margin-top:10px;">إرسال التعميم</button>
                 </form>
             </div>
 
             <div id="backupSec" class="card">
                 <h3 style="color:#0d47a1; margin-top:0;">💾 النسخ الاحتياطي والاسترداد</h3>
-                
-                <div style="background:#f1f8e9; padding:15px; border-radius:6px; border:1px solid #c5e1a5; margin-bottom:15px;">
-                    <h4 style="color:#2e7d32; margin-top:0;">1. تنزيل نسخة احتياطية:</h4>
-                    <p style="color:#555; font-size:13.5px; margin-bottom:10px;">قم بتنزيل كافة بيانات النظام (الساعات، العلامات، الحضور، الحسابات) وحفظها على جهازك.</p>
-                    <a href="/admin/download_backup" style="display:inline-block; background:#2e7d32; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:bold;">📥 تنزيل ملف النسخة الاحتياطية (JSON)</a>
-                </div>
-
-                <div style="background:#fff3e0; padding:15px; border-radius:6px; border:1px solid #ffe0b2;">
-                    <h4 style="color:#e65100; margin-top:0;">2. استرداد بيانات سابقة (Upload Backup):</h4>
-                    <p style="color:#555; font-size:13.5px; margin-bottom:10px;">إذا قمت بتنزيل نسخة سابقة، يمكنك رفعها هنا للاسترجاع الفوري:</p>
-                    <form method="POST" enctype="multipart/form-data">
-                        <input type="hidden" name="action" value="restore_backup_file">
-                        <input type="file" name="backup_file" accept=".json" required>
-                        <button type="submit" style="background:#e65100; margin-top:10px;">♻️ استرداد واسترجاع قاعدة البيانات الآن</button>
-                    </form>
-                </div>
+                <a href="/admin/download_backup" style="display:inline-block; background:#2e7d32; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:bold;">📥 تنزيل نسخة احتياطية (JSON)</a>
             </div>
 
             <div id="teacherRepliesSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">📩 الأعذار والرسائل الواردة</h3>
-                {{ replies_html | safe if replies_html else '<p>لا توجد رسائل.</p>' }}
-            </div>
-
-            <div id="changePassSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">🔑 تغيير كلمة السر الإدارية</h3>
-                <form method="POST">
-                    <input type="hidden" name="action" value="change_admin_password">
-                    <input type="password" name="new_password" placeholder="كلمة المرور الجديدة" required>
-                    <button type="submit" style="background:#c62828; margin-top:10px;">تحديث</button>
-                </form>
+                <h3 style="color:#0d47a1; margin-top:0;">📩 الرسائل الواردة</h3>
+                {{ replies_html | safe }}
             </div>
         </div>
 
@@ -935,7 +836,7 @@ def admin_dashboard():
     </body>
     </html>
     '''
-    return render_template_string(admin_template, attendance_rows=attendance_rows, grades_rows=grades_rows, teachers_rows=teachers_rows, field_rows=field_rows, replies_html=replies_html, teacher_opts=teacher_opts, locations_opts=locations_opts, directorate_htmls=directorate_htmls, executed_hours_table_html=executed_hours_table_html, transport_table_html=transport_table_html, msg=msg)
+    return render_template_string(admin_template, attendance_rows=attendance_rows, teachers_rows=teachers_rows, late_teachers_rows=late_teachers_rows, official_reports_list_html=official_reports_list_html, field_rows=field_rows, replies_html=replies_html, teacher_opts=teacher_opts, locations_opts=locations_opts, directorate_htmls=directorate_htmls, msg=msg)
 
 @app.route('/teacher', methods=['GET', 'POST'])
 def teacher_dashboard():
@@ -947,26 +848,59 @@ def teacher_dashboard():
     norm_t_name = normalize_name(t_name)
     msg = ''
 
+    parsed_schedule = directorate_excel_tables.get('weekly_schedule', {}).get('parsed_schedule', {})
+    my_schedule_items = parsed_schedule.get(norm_t_name, [])
+
+    my_classes_map = {}
+    for item in my_schedule_items:
+        c_name = item['class']
+        s_name = item['subject']
+        if c_name not in my_classes_map:
+            my_classes_map[c_name] = []
+        if s_name not in my_classes_map[c_name]:
+            my_classes_map[c_name].append(s_name)
+
     if request.method == 'POST':
         action = request.form.get('action')
         
-        if action == 'change_my_password':
-            new_p = request.form.get('new_password', '').strip()
-            if new_p:
-                user_data['password'] = new_p
-                save_to_disk()
-                msg = "تم تغيير كلمة المرور الخاصة بك بنجاح! وستظهر للإدارة في سجل الأساتذة."
-
-        elif action == 'submit_class_grades':
+        if action == 'submit_class_grades':
             class_name = request.form.get('class_name')
-            subject = user_data.get('subject', 'عام')
-            students = classes_students.get(class_name, [])
-            for st in students:
-                val = request.form.get(f"grade_{st}")
-                if val:
-                    grades_db[f"{st} - {class_name} ({subject})"] = val
-            save_to_disk()
-            msg = "تم حفظ ورصد علامات الطلاب بنجاح!"
+            subject_name = request.form.get('subject_name')
+            
+            if class_name in my_classes_map and subject_name in my_classes_map[class_name]:
+                students = classes_students.get(class_name, [])
+                perm_key = f"{username} || {class_name} || {subject_name}"
+                is_granted = grade_edit_permissions.get(perm_key, False)
+                already_submitted = any(f"{st} || {class_name} || {subject_name}" in grades_db for st in students)
+                
+                if already_submitted and not is_granted:
+                    msg = "عذراً! لقد قمت برصد وتسليم العلامات لهذه المادة سابقاً، ولا يمكنك التعديل إلا بعد أخذ إذن وموافقة المدير."
+                else:
+                    for st in students:
+                        g_val = request.form.get(f"grade_{st}")
+                        note_val = request.form.get(f"note_{st}", '')
+                        g_key = f"{st} || {class_name} || {subject_name}"
+                        
+                        existing = grades_db.get(g_key, {})
+                        first_g = existing.get('grade', g_val)
+                        mod_g = g_val if already_submitted else ''
+                        
+                        grades_db[g_key] = {
+                            "student": st,
+                            "class": class_name,
+                            "subject": subject_name,
+                            "grade": first_g,
+                            "modified_grade": mod_g,
+                            "note": note_val,
+                            "teacher": username,
+                            "submitted_at": datetime.now().strftime('%Y-%m-%d %H:%M')
+                        }
+                    
+                    if is_granted:
+                        grade_edit_permissions[perm_key] = False
+                        
+                    save_to_disk()
+                    msg = "تم حفظ ورصد علامات وملاحظات الطلاب بنجاح!"
 
         elif action == 'submit_class_attendance':
             class_name = request.form.get('class_name')
@@ -978,117 +912,29 @@ def teacher_dashboard():
             save_to_disk()
             msg = "تم تسجيل حضور وغياب الطلاب بنجاح!"
 
-        elif action == 'send_reply':
-            reply_msg = request.form.get('reply_message')
-            admin_replies.append({'teacher_name': t_name, 'message': reply_msg, 'report': None, 'date': datetime.now().strftime('%Y-%m-%d %H:%M')})
-            save_to_disk()
-            msg = "تم إرسال رسالتك للإدارة بنجاح!"
-
-    my_classes = teacher_classes_map.get(username, list(classes_students.keys()))
-    class_opts = "".join([f'<option value="{c}">{c}</option>' for c in my_classes])
+    my_class_opts = "".join([f'<option value="{c}">{c}</option>' for c in my_classes_map.keys()])
     
-    raw_notifs = user_data.get('notifications', [])
-    notifs = ""
-    if raw_notifs:
-        for n in reversed(raw_notifs):
-            clean_n = str(n).replace('<p>', '').replace('</p>', '').strip()
-            if clean_n:
-                notifs += f"<div style='background:#e3f2fd; padding:12px; margin-bottom:8px; border-radius:6px; font-weight:bold; color:#0d47a1; border-right:4px solid #1565c0;'>{clean_n}</div>"
-    
-    if not notifs:
-        notifs = "<p style='color:#666; margin:0;'>لا توجد تعاميم جديدة.</p>"
+    pending_alerts = []
+    for c_name, sub_list in my_classes_map.items():
+        st_list = classes_students.get(c_name, [])
+        for s_name in sub_list:
+            submitted = any(f"{st} || {c_name} || {s_name}" in grades_db for st in st_list)
+            if not submitted:
+                pending_alerts.append(f"⚠️ صف ({c_name}) - مادة ({s_name})")
 
-    all_monthly_hours = directorate_excel_tables.get('executed_hours', {}).get('monthly_hours', {})
-    monthly_hrs = user_data.get('monthly_hours', {})
-    if not monthly_hrs and norm_t_name in all_monthly_hours:
-        monthly_hrs = all_monthly_hours[norm_t_name]
+    pending_alerts_html = ""
+    if pending_alerts:
+        pending_alerts_html = "<div style='background:#fff3e0; border-right:4px solid #e65100; padding:10px; margin-bottom:12px; font-weight:bold; color:#e65100;'>تنبيه: لديك مواد لم تقم برصد علاماتها بعد:<br>" + "<br>".join(pending_alerts) + "</div>"
 
-    contract_hrs = float(user_data.get('contract_hours', 300))
-    executed_hrs = sum([float(v) for v in monthly_hrs.values()]) if monthly_hrs else 0
-    remaining_hrs = contract_hrs - executed_hrs
-    rem_color = "#2e7d32" if remaining_hrs >= 0 else "#c62828"
-
-    all_transport = directorate_excel_tables.get('transport_days', {}).get('monthly_transport', {})
-    my_transport_days = sum(all_transport.get(norm_t_name, {}).values()) if norm_t_name in all_transport else 0
-    
-    hrs_html = ""
-    if monthly_hrs:
-        m_headers = "".join([f"<th>ش {m}</th>" for m in MONTH_COLUMNS])
-        m_tds = "".join([f"<td>{monthly_hrs.get(m, 0):.0f}</td>" for m in MONTH_COLUMNS])
-        
-        hrs_html = f"""
-        <div class="card" style="border-top:4px solid #1565c0; background:#ffffff;">
-            <h4 style="color:#0d47a1; margin-top:0; border-bottom:2px solid #e3f2fd; padding-bottom:8px;">📊 ملخص عقد الساعات والمنفذ شهرياً:</h4>
-            
-            <div style="display:flex; gap:12px; margin-bottom:15px; flex-wrap:wrap;">
-                <div style="flex:1; min-width:130px; background:#e3f2fd; padding:12px; border-radius:8px; text-align:center;">
-                    <small style="color:#0d47a1; font-weight:bold;">ساعات العقد الإجمالية</small>
-                    <div style="font-size:20px; font-weight:bold; color:#0d47a1; margin-top:4px;">{int(contract_hrs)} ساعة</div>
-                </div>
-                <div style="flex:1; min-width:130px; background:#e8f5e9; padding:12px; border-radius:8px; text-align:center;">
-                    <small style="color:#2e7d32; font-weight:bold;">المنفذ حتى الآن</small>
-                    <div style="font-size:20px; font-weight:bold; color:#2e7d32; margin-top:4px;">{executed_hrs:.0f} ساعة</div>
-                </div>
-                <div style="flex:1; min-width:130px; background:#fff3e0; padding:12px; border-radius:8px; text-align:center;">
-                    <small style="color:#e65100; font-weight:bold;">المتبقي من العقد</small>
-                    <div style="font-size:20px; font-weight:bold; color:{rem_color}; margin-top:4px;">{remaining_hrs:.0f} ساعة</div>
-                </div>
-                <div style="flex:1; min-width:130px; background:#f3e5f5; padding:12px; border-radius:8px; text-align:center;">
-                    <small style="color:#6a1b9a; font-weight:bold;">أيام النقل المسجلة</small>
-                    <div style="font-size:20px; font-weight:bold; color:#6a1b9a; margin-top:4px;">{my_transport_days:.0f} يوم</div>
-                </div>
-            </div>
-
-            <div style="overflow-x:auto;">
-                <table style="width:100%; border-collapse:collapse;">
-                    <tr>{m_headers}</tr>
-                    <tr>{m_tds}</tr>
-                </table>
-            </div>
-        </div>
-        """
-    else:
-        hrs_html = f"""
-        <div class="card" style="border-top:4px solid #1565c0;">
-            <h4 style="color:#0d47a1; margin-top:0;">📊 ملخص العقد والساعات:</h4>
-            <p style="margin:0; color:#555;">ساعات العقد الإجمالية المسجلة: <b>{int(contract_hrs)} ساعة</b> (في انتظار رفع ملف الساعات المنفذة للمديرية).</p>
-        </div>
-        """
-
-    parsed_schedule = directorate_excel_tables.get('weekly_schedule', {}).get('parsed_schedule', {})
-    teacher_schedule_items = parsed_schedule.get(norm_t_name, [])
     schedule_html = ""
-    if teacher_schedule_items:
-        schedule_rows = "".join([f"<tr><td><b>{item['day']}</b></td><td>{item['period']}</td><td>{item['class']}</td><td><b style='color:#0d47a1;'>{item['subject']}</b></td></tr>" for item in teacher_schedule_items])
-        schedule_html = f"""
-        <div class="card" style="border-top:4px solid #2e7d32;">
-            <h4 style="color:#2e7d32; margin-top:0;">📅 برنامجي الأسبوعي الخطي والمواد الخاصة بي:</h4>
-            <table>
-                <tr><th>اليوم</th><th>الحصة</th><th>الصف والمستوى</th><th>المادة</th></tr>
-                {schedule_rows}
-            </table>
-        </div>
-        """
+    if my_schedule_items:
+        s_rows = "".join([f"<tr><td><b>{item['day']}</b></td><td>{item['period']}</td><td>{item['class']}</td><td><b style='color:#0d47a1;'>{item['subject']}</b></td></tr>" for item in my_schedule_items])
+        schedule_html = f"<div class='card' style='border-top:4px solid #2e7d32;'><h4 style='color:#2e7d32; margin-top:0;'>📅 برنامجي الأسبوعي الخطي والمواد الخاصة بي:</h4><table><tr><th>اليوم</th><th>الحصة</th><th>الصف والمستوى</th><th>المادة</th></tr>{s_rows}</table></div>"
     else:
-        schedule_html = """
-        <div class="card" style="border-top:4px solid #757575;">
-            <h4 style="color:#616161; margin-top:0;">📅 برنامجي الأسبوعي:</h4>
-            <p style="margin:0; color:#777;">لم يتم استخراج برنامج أسبوعي محدد لهذا الأستاذ من ملف المديرية المرفوع بعد.</p>
-        </div>
-        """
+        schedule_html = "<div class='card'><p style='color:#777;'>لم يتم رفع البرنامج الأسبوعي أو لم يتم العثور على حصص مرتبطة باسمك بعد. يرجى التأكد من رفع ملف البرنامج الأسبوعي من لوحة الإدارة.</p></div>"
 
-    my_sessions = [s for s in field_sessions if normalize_name(s['primary_teacher']) == norm_t_name or normalize_name(s.get('secondary_teacher', '')) == norm_t_name]
-    field_html = ""
-    for s in my_sessions:
-        if s['status'] == 'قيد التدريب':
-            field_html += f'''
-            <div style="background:#f9fbe7; border:1px solid #c0ca33; padding:12px; border-radius:6px; margin-top:8px;">
-                <b>📍 مكان التدريب الميداني: {s['location']} ({s['class_name']})</b>
-                <button type="button" onclick="submitGps({s['id']}, '{t_name}', '{s['location']}')" style="background:#2e7d32; margin-top:8px;">📍 توثيق الحضور الجغرافي (GPS)</button>
-            </div>
-            '''
-        else:
-            field_html += f'''<div style="background:#e8f5e9; padding:8px; border-radius:6px; margin-top:8px; color:#2e7d32; font-weight:bold;">✔ تم توثيق الحضور الجغرافي لـ ({s['location']}) بنجاح!</div>'''
+    raw_notifs = user_data.get('notifications', [])
+    notifs = "".join([f"<div style='background:#e3f2fd; padding:10px; margin-bottom:6px; border-radius:6px; font-weight:bold; color:#0d47a1;'>🔔 {str(n)}</div>" for n in reversed(raw_notifs)]) if raw_notifs else "<p style='color:#666;'>لا توجد تعاميم جديدة.</p>"
 
     teacher_template = """
     <!DOCTYPE html>
@@ -1104,53 +950,40 @@ def teacher_dashboard():
             table { width: 100%; border-collapse: collapse; margin-top: 10px; }
             th, td { border: 1px solid #e0e0e0; padding: 8px; text-align: center; font-size: 13px; }
             th { background: #0d47a1; color: white; }
-            .student-row { display: flex; justify-content: space-between; align-items: center; padding: 8px; border-bottom: 1px solid #eee; background: #fafafa; margin-top: 5px; border-radius: 4px; }
-            
-            /* النافذة المنبثقة للتنبيه */
-            #alertModal { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(13,71,161,0.6); z-index:9999; justify-content:center; align-items:center; backdrop-filter: blur(3px); }
-            .alertBox { background:white; padding:25px; border-radius:12px; max-width:85%; text-align:center; box-shadow:0 10px 30px rgba(0,0,0,0.25); border-top:6px solid #0d47a1; }
+            .student-row { display: flex; gap: 10px; align-items: center; padding: 8px; border-bottom: 1px solid #eee; background: #fafafa; margin-top: 5px; border-radius: 4px; }
         </style>
     </head>
-    <body onclick="enableAudioOnUserGesture()">
+    <body>
         <div style="background:#0d47a1; color:white; padding:12px 20px; display:flex; justify-content:space-between; align-items:center;">
             <div><h3 style="margin:0;">معهد الهرمل الفني</h3><small>الأستاذ: {{ t_name }}</small></div>
             <a href="/logout" style="color:#ffcdd2; background:#c62828; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px;">خروج</a>
         </div>
 
-        <!-- صوت الإشعار المحترم والمباشر -->
-        <audio id="notifSound" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" preload="auto"></audio>
-
-        <!-- نافذة الإشعار المنبثقة -->
-        <div id="alertModal">
-            <div class="alertBox">
-                <div style="font-size:36px; margin-bottom:8px;">🔔</div>
-                <h3 style="color:#0d47a1; margin:0 0 10px 0;">تعميم جديد من إدارة المعهد</h3>
-                <div id="alertMessage" style="font-size:15.5px; font-weight:bold; color:#333; margin-bottom:20px; line-height:1.6;"></div>
-                <button type="button" onclick="stopAlert()" style="background:#0d47a1; font-size:15px; padding:10px 20px; border-radius:6px;">✔ حسناً، قرأت التعميم</button>
-            </div>
-        </div>
-
         <div style="padding:15px;">
             {% if msg %}<div style="background:#e8f5e9; color:#2e7d32; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold;">{{ msg }}</div>{% endif %}
 
-            {{ hrs_html | safe }}
+            {{ pending_alerts_html | safe }}
 
             {{ schedule_html | safe }}
 
-            {{ field_html | safe }}
-
             <div class="card">
-                <h4 style="color:#0d47a1; margin-top:0;">🔑 تغيير كلمة المرور الخاصة بي:</h4>
+                <h4 style="color:#0d47a1; margin-top:0;">📝 إدخال ورصد علامات الطلاب (من 0 إلى 20 أو غائب):</h4>
                 <form method="POST">
-                    <input type="hidden" name="action" value="change_my_password">
-                    <input type="password" name="new_password" placeholder="أدخل كلمة المرور الجديدة..." required>
-                    <button type="submit" style="background:#1565c0; margin-top:8px;">تحديث كلمة المرور</button>
-                </form>
-            </div>
+                    <input type="hidden" name="action" value="submit_class_grades">
+                    <label>اختر الصف الخاص بك:</label>
+                    <select name="class_name" id="gradeClass" onchange="updateSubjectOpts()" required>
+                        <option value="">-- اختر الصف --</option>
+                        {{ my_class_opts | safe }}
+                    </select>
 
-            <div class="card">
-                <h4 style="color:#0d47a1; margin-top:0;">📢 التعاميم والإشعارات الواردة:</h4>
-                {{ notifs | safe }}
+                    <label style="margin-top:10px; display:block;">اختر المادة التعليمية الخاصة بك:</label>
+                    <select name="subject_name" id="gradeSubject" onchange="loadStudentsForGrades()" required>
+                        <option value="">-- اختر المادة --</option>
+                    </select>
+
+                    <div id="gradeContainer" style="margin-top:10px;"></div>
+                    <button type="submit" id="gradeBtn" style="display:none; margin-top:10px;">💾 تسليم ورصد العلامات رسمياً</button>
+                </form>
             </div>
 
             <div class="card">
@@ -1158,91 +991,101 @@ def teacher_dashboard():
                 <form method="POST">
                     <input type="hidden" name="action" value="submit_class_attendance">
                     <label>اختر الصف:</label>
-                    <select name="class_name" id="attClass" onchange="loadStudentsForAtt()" required><option value="">-- اختر الصف --</option>{{ class_opts | safe }}</select>
+                    <select name="class_name" id="attClass" onchange="loadStudentsForAtt()" required><option value="">-- اختر الصف --</option>{{ my_class_opts | safe }}</select>
                     <div id="attContainer" style="margin-top:10px;"></div>
                     <button type="submit" id="attBtn" style="display:none; background:#2e7d32; margin-top:10px;">حفظ الحضور والغياب</button>
                 </form>
             </div>
 
             <div class="card">
-                <h4 style="color:#0d47a1; margin-top:0;">📝 إدخال ورصد علامات الطلاب (من 20):</h4>
-                <form method="POST">
-                    <input type="hidden" name="action" value="submit_class_grades">
-                    <label>اختر الصف:</label>
-                    <select name="class_name" id="gradeClass" onchange="loadStudentsForGrades()" required><option value="">-- اختر الصف --</option>{{ class_opts | safe }}</select>
-                    <div id="gradeContainer" style="margin-top:10px;"></div>
-                    <button type="submit" id="gradeBtn" style="display:none; margin-top:10px;">حفظ ورصد العلامات</button>
-                </form>
-            </div>
-
-            <div class="card">
-                <h4 style="color:#0d47a1; margin-top:0;">💬 إرسال رسالة أو عذر لإدارة المعهد:</h4>
-                <form method="POST">
-                    <input type="hidden" name="action" value="send_reply">
-                    <textarea name="reply_message" placeholder="اكتب رسالتك..." required style="height:70px;"></textarea>
-                    <button type="submit" style="background:#1565c0; margin-top:8px;">إرسال للإدارة</button>
-                </form>
+                <h4 style="color:#0d47a1; margin-top:0;">📢 الإشعارات الواردة:</h4>
+                {{ notifs | safe }}
             </div>
         </div>
 
         <script>
-            let lastNotifCount = -1;
-            let audioEnabled = false;
+            let myClassesData = {{ my_classes_map | tojson }};
 
-            // إذن سماح الصوت بمجرد لمس الشاشة لأول مرة
-            function enableAudioOnUserGesture() {
-                if(!audioEnabled) {
-                    let audio = document.getElementById('notifSound');
-                    if(audio) {
-                        audio.play().then(() => {
-                            audio.pause();
-                            audio.currentTime = 0;
-                            audioEnabled = true;
-                        }).catch(e => {});
-                    }
+            function updateSubjectOpts() {
+                let cls = document.getElementById('gradeClass').value;
+                let subSelect = document.getElementById('gradeSubject');
+                subSelect.innerHTML = '<option value="">-- اختر المادة --</option>';
+                document.getElementById('gradeContainer').innerHTML = '';
+                document.getElementById('gradeBtn').style.display = 'none';
+
+                if(cls && myClassesData[cls]) {
+                    myClassesData[cls].forEach(s => {
+                        subSelect.innerHTML += `<option value="${s}">${s}</option>`;
+                    });
                 }
             }
 
-            function playNotificationSound() {
-                let audio = document.getElementById('notifSound');
-                if(audio) {
-                    audio.currentTime = 0;
-                    audio.play().catch(e => { console.log("تأكُّد من إذن الصوت للمتصفح"); });
-                }
-            }
+            function loadStudentsForGrades() {
+                let cls = document.getElementById('gradeClass').value;
+                let sub = document.getElementById('gradeSubject').value;
+                let cont = document.getElementById('gradeContainer');
+                let btn = document.getElementById('gradeBtn');
+                cont.innerHTML = '';
+                if(!cls || !sub) { btn.style.display='none'; return; }
 
-            function triggerVibration() {
-                if ("vibrate" in navigator) {
-                    navigator.vibrate([200, 100, 200, 100, 300]);
-                }
-            }
-
-            function startFullAlert(msgText) {
-                document.getElementById('alertMessage').innerText = msgText;
-                document.getElementById('alertModal').style.display = 'flex';
-                playNotificationSound();
-                triggerVibration();
-            }
-
-            function stopAlert() {
-                document.getElementById('alertModal').style.display = 'none';
-                location.reload();
-            }
-
-            function pollNotifications() {
-                fetch('/api/check_notifications').then(res => res.json()).then(data => {
-                    let notifs = data.notifications || [];
-                    if(lastNotifCount === -1) {
-                        lastNotifCount = notifs.length;
-                    } else if(notifs.length > lastNotifCount) {
-                        lastNotifCount = notifs.length;
-                        let newest = notifs[notifs.length - 1];
-                        startFullAlert(newest);
-                    }
+                fetch('/api/get_students/' + encodeURIComponent(cls)).then(res => res.json()).then(data => {
+                    let html = '';
+                    data.students.forEach(st => {
+                        html += `
+                        <div class="student-row">
+                            <span style="flex:1; font-weight:bold;">${st}</span>
+                            <select name="grade_${st}" style="width:120px; margin:0;" required>
+                                <option value="">-- العلامة --</option>
+                                <option value="غائب">غائب (Absent)</option>
+                                <option value="0">0 / 20</option>
+                                <option value="0.5">0.5 / 20</option>
+                                <option value="1">1 / 20</option>
+                                <option value="1.5">1.5 / 20</option>
+                                <option value="2">2 / 20</option>
+                                <option value="2.5">2.5 / 20</option>
+                                <option value="3">3 / 20</option>
+                                <option value="3.5">3.5 / 20</option>
+                                <option value="4">4 / 20</option>
+                                <option value="4.5">4.5 / 20</option>
+                                <option value="5">5 / 20</option>
+                                <option value="5.5">5.5 / 20</option>
+                                <option value="6">6 / 20</option>
+                                <option value="6.5">6.5 / 20</option>
+                                <option value="7">7 / 20</option>
+                                <option value="7.5">7.5 / 20</option>
+                                <option value="8">8 / 20</option>
+                                <option value="8.5">8.5 / 20</option>
+                                <option value="9">9 / 20</option>
+                                <option value="9.5">9.5 / 20</option>
+                                <option value="10">10 / 20</option>
+                                <option value="10.5">10.5 / 20</option>
+                                <option value="11">11 / 20</option>
+                                <option value="11.5">11.5 / 20</option>
+                                <option value="12">12 / 20</option>
+                                <option value="12.5">12.5 / 20</option>
+                                <option value="13">13 / 20</option>
+                                <option value="13.5">13.5 / 20</option>
+                                <option value="14">14 / 20</option>
+                                <option value="14.5">14.5 / 20</option>
+                                <option value="15">15 / 20</option>
+                                <option value="15.5">15.5 / 20</option>
+                                <option value="16">16 / 20</option>
+                                <option value="16.5">16.5 / 20</option>
+                                <option value="17">17 / 20</option>
+                                <option value="17.5">17.5 / 20</option>
+                                <option value="18">18 / 20</option>
+                                <option value="18.5">18.5 / 20</option>
+                                <option value="19">19 / 20</option>
+                                <option value="19.5">19.5 / 20</option>
+                                <option value="20">20 / 20</option>
+                            </select>
+                            <input type="text" name="note_${st}" placeholder="ملاحظة (اختياري)" style="width:160px; margin:0;">
+                        </div>`;
+                    });
+                    cont.innerHTML = html;
+                    btn.style.display = 'block';
                 });
             }
-
-            setInterval(pollNotifications, 10000);
 
             function loadStudentsForAtt() {
                 let cls = document.getElementById('attClass').value;
@@ -1253,73 +1096,17 @@ def teacher_dashboard():
                 fetch('/api/get_students/' + encodeURIComponent(cls)).then(res => res.json()).then(data => {
                     let html = '<p style="font-size:13.5px; color:#0d47a1; font-weight:bold;">الكل حاضر افتراضياً ✅ (أزل الصح عن المتغيب):</p>';
                     data.students.forEach(st => {
-                        html += `<div class="student-row"><span>${st}</span><label style="color:#2e7d32; font-weight:bold; cursor:pointer;"><input type="checkbox" name="attendance_check" value="${st}" checked style="width:auto; transform:scale(1.2);"> حاضر</label></div>`;
+                        html += `<div class="student-row"><span style="flex:1;">${st}</span><label style="color:#2e7d32; font-weight:bold; cursor:pointer;"><input type="checkbox" name="attendance_check" value="${st}" checked style="width:auto; transform:scale(1.2);"> حاضر</label></div>`;
                     });
                     cont.innerHTML = html;
                     btn.style.display = 'block';
                 });
-            }
-
-            function loadStudentsForGrades() {
-                let cls = document.getElementById('gradeClass').value;
-                let cont = document.getElementById('gradeContainer');
-                let btn = document.getElementById('gradeBtn');
-                cont.innerHTML = '';
-                if(!cls) { btn.style.display='none'; return; }
-                fetch('/api/get_students/' + encodeURIComponent(cls)).then(res => res.json()).then(data => {
-                    let html = '';
-                    data.students.forEach(st => {
-                        html += `<div class="student-row"><span style="flex:1; font-weight:bold;">${st}</span><input type="number" step="0.5" min="0" max="20" name="grade_${st}" placeholder="العلامة /20" style="width:110px; margin-top:0;" required></div>`;
-                    });
-                    cont.innerHTML = html;
-                    btn.style.display = 'block';
-                });
-            }
-
-            function submitGps(sessionId, teacherName, locationName) {
-                if(!navigator.geolocation) { alert("الـ GPS غير مدعوم في متصفحك"); return; }
-                navigator.geolocation.getCurrentPosition(function(pos) {
-                    fetch('/teacher/submit_field_attendance', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({session_id: sessionId, sender_name: teacherName, location: locationName, lat: pos.coords.latitude, lng: pos.coords.longitude})
-                    }).then(res => res.json()).then(data => {
-                        alert(data.message);
-                        if(data.success) location.reload();
-                    });
-                }, function(err) { alert("يرجى تفعيل الـ GPS لتأكيد الحضور."); }, {enableHighAccuracy: true});
             }
         </script>
     </body>
     </html>
     """
-    return render_template_string(teacher_template, t_name=t_name, msg=msg, class_opts=class_opts, notifs=notifs, hrs_html=hrs_html, schedule_html=schedule_html, field_html=field_html)
-
-@app.route('/teacher/submit_field_attendance', methods=['POST'])
-def submit_field_attendance():
-    if session.get('role') != 'teacher': return jsonify({"success": False, "message": "غير مصرح"}), 403
-    data = request.json
-    s_id = int(data.get('session_id'))
-    loc_name = data.get('location')
-    lat = float(data.get('lat'))
-    lng = float(data.get('lng'))
-
-    if loc_name in TRAINING_LOCATIONS:
-        loc_data = TRAINING_LOCATIONS[loc_name]
-        dist = calculate_distance(lat, lng, loc_data['lat'], loc_data['lng'])
-        if dist > loc_data['radius_meters']:
-            return jsonify({"success": False, "message": f"عذراً! أنت خارج نطاق موقع ({loc_name}). المسافة الحالية هي {int(dist)} متر والنطاق المسموح هو {loc_data['radius_meters']} متر."}), 400
-
-    s_item = next((s for s in field_sessions if s['id'] == s_id), None)
-    if s_item:
-        s_item['status'] = "مكتملة"
-        save_to_disk()
-        return jsonify({"success": True, "message": "تم التحقق الجغرافي بالـ GPS بنجاح وتوثيق حضورك!"})
-    return jsonify({"success": False, "message": "الجلسة غير متوفرة"}), 400
-
-@app.route('/uploads/<filename>')
-def uploaded_file(filename):
-    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+    return render_template_string(teacher_template, t_name=t_name, msg=msg, my_class_opts=my_class_opts, my_classes_map=my_classes_map, pending_alerts_html=pending_alerts_html, schedule_html=schedule_html, notifs=notifs)
 
 @app.route('/logout')
 def logout():
