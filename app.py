@@ -44,12 +44,11 @@ students_db = []
 field_sessions = []
 MONTH_COLUMNS = ["10", "11", "12", "01", "02", "03", "04", "05", "06", "07", "08"]
 
-# جميع جداول الإكسل الستة المعتمدة لديك
 directorate_excel_tables = {
     "executed_hours": {"title": "الساعات المنفذة للأساتذة", "columns": [], "data": [], "monthly_hours": {}},
     "students_registered": {"title": "الطلاب المسجلون", "columns": [], "data": []},
     "personal_info": {"title": "المعلومات الشخصية", "columns": [], "data": []},
-    "transport_days": {"title": "أيام الحضور للأساتذة", "columns": [], "data": [], "monthly_transport": {}},
+    "transport_days": {"title": "أيام الحضور وبدل النقل للأساتذة", "columns": [], "data": [], "monthly_transport": {}},
     "weekly_schedule": {"title": "برنامج أسبوعي مع الأساتذة والمواد", "columns": [], "data": [], "parsed_schedule": {}},
     "teachers_cards": {"title": "بطاقات الأساتذة", "columns": [], "data": []}
 }
@@ -132,7 +131,6 @@ load_from_disk()
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# دالة سحب كافة تفاصيل البرنامج الأسبوعي من الإكسل بالكامل
 def parse_weekly_schedule(df):
     parsed_teachers = {}
     current_class = "عام"
@@ -224,7 +222,7 @@ HEADER_VTE_HTML = '''
     <div class="dropdown">
         <button class="dropbtn">إعدادات وإدارة ▾</button>
         <div class="dropdown-content">
-            <a href="javascript:void(0)" onclick="showSection('grantEditPermissionSec')">🔓 منح إذن تعديل علامة لأستاذ</a>
+            <a href="javascript:void(0)" onclick="showSection('grantEditPermissionSec')">💡 تحكم بفتح/إغلاق إدخال العلامات (On/Off)</a>
             <a href="javascript:void(0)" onclick="showSection('uploadDirectorateFilesSec')">⚙️ رفع ملفات المديرية والبرنامج (Excel)</a>
             <a href="javascript:void(0)" onclick="showSection('deviceBindingSec')">📱 إدارة أجهزة الأساتذة (فك الربط)</a>
             <a href="javascript:void(0)" onclick="showSection('sendNotifSec')">📢 إرسال تعميم / تنبيه</a>
@@ -239,7 +237,7 @@ HEADER_VTE_HTML = '''
     .dropdown { position: relative; display: inline-block; }
     .dropbtn { background-color: #1565c0; color: white; padding: 12px 16px; font-size: 14px; border: none; cursor: pointer; font-weight: bold; font-family: inherit; }
     .dropdown:hover .dropbtn { background-color: #0d47a1; }
-    .dropdown-content { display: none; position: absolute; background-color: #ffffff; min-width: 260px; box-shadow: 0px 8px 16px rgba(0,0,0,0.2); z-index: 100; border-radius: 0 0 6px 6px; }
+    .dropdown-content { display: none; position: absolute; background-color: #ffffff; min-width: 280px; box-shadow: 0px 8px 16px rgba(0,0,0,0.2); z-index: 100; border-radius: 0 0 6px 6px; }
     .dropdown-content a { color: #333; padding: 10px 15px; text-decoration: none; display: block; font-size: 13.5px; border-bottom: 1px solid #f0f0f0; }
     .dropdown-content a:hover { background-color: #e3f2fd; color: #0d47a1; font-weight: bold; }
     .dropdown:hover .dropdown-content { display: block; }
@@ -335,7 +333,6 @@ def check_notifications():
     user_data = teachers_db.get(username, {})
     return jsonify({'notifications': user_data.get('notifications', [])})
 
-# التقرير الرسمي المعتمد لعلامات الطلاب
 @app.route('/report/official_sheet')
 def official_report_sheet():
     class_name = request.args.get('class_name', '')
@@ -445,17 +442,23 @@ def official_report_sheet():
     '''
     return render_template_string(report_template)
 
-@app.route('/admin/grant_edit_permission', methods=['POST'])
-def grant_edit_permission():
+@app.route('/admin/toggle_grade_permission', methods=['POST'])
+def toggle_grade_permission():
     if session.get('role') != 'admin': return redirect(url_for('login'))
     t_user = request.form.get('target_user')
     c_name = request.form.get('class_name')
     s_name = request.form.get('subject_name')
+    action_type = request.form.get('action_type')
     
     perm_key = f"{t_user} || {c_name} || {s_name}"
-    grade_edit_permissions[perm_key] = True
+    if action_type == 'open':
+        grade_edit_permissions[perm_key] = True
+        session['msg'] = f"🟢 تم فتح وتخويل إدخال العلامات لمادة ({s_name}) صف ({c_name}) بنجاح!"
+    else:
+        grade_edit_permissions[perm_key] = False
+        session['msg'] = f"🔴 تم قفل وإغلاق إدخال العلامات لمادة ({s_name}) صف ({c_name})."
+    
     save_to_disk()
-    session['msg'] = f"تم منح الأستاذ إذن تعديل العلامات للصف ({c_name}) مادة ({s_name}) بنجاح!"
     return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/download_backup')
@@ -487,7 +490,7 @@ def create_field_session():
     }
     field_sessions.append(new_s)
     save_to_disk()
-    session['msg'] = "تم تكليف جلسة التدريب الميداني وحفظ البيانات بنجاح!"
+    session['msg'] = "تم تكليف جلسة التدريب الميداني مع الأستاذ الأساسي والمساعد بنجاح!"
     return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/delete_reply/<int:reply_id>', methods=['POST'])
@@ -552,18 +555,64 @@ def admin_dashboard():
                         parsed = parse_weekly_schedule(df)
                         directorate_excel_tables['weekly_schedule']['parsed_schedule'] = parsed
 
+                    if file_key == 'executed_hours':
+                        monthly_map = {}
+                        contract_map = {}
+                        for r in rows_data:
+                            t_raw_name = r.get('الاسم الثلاثي', r.get('اسم الاستاذ', '')).strip()
+                            t_norm_key = normalize_name(t_raw_name)
+                            if t_raw_name:
+                                if t_norm_key not in monthly_map: monthly_map[t_norm_key] = {}
+                                allowed_hrs = r.get('عدد الساعات المسموح بها', r.get('Maxhoures', None))
+                                if allowed_hrs is not None and str(allowed_hrs).strip() != '':
+                                    try: contract_map[t_norm_key] = int(float(allowed_hrs))
+                                    except: pass
+                                for m_col in MONTH_COLUMNS:
+                                    found_val = None
+                                    for key, val in r.items():
+                                        if clean_column_name(key) == m_col:
+                                            found_val = val
+                                            break
+                                    if found_val is not None:
+                                        try: monthly_map[t_norm_key][m_col] = float(found_val or 0)
+                                        except: monthly_map[t_norm_key][m_col] = 0.0
+                                    else:
+                                        monthly_map[t_norm_key][m_col] = 0.0
+                        directorate_excel_tables['executed_hours']['monthly_hours'] = monthly_map
+                        for u, t_info in teachers_db.items():
+                            t_norm = normalize_name(t_info['name'])
+                            if t_norm in monthly_map: t_info['monthly_hours'] = monthly_map[t_norm]
+                            if t_norm in contract_map: t_info['contract_hours'] = contract_map[t_norm]
+
+                    if file_key == 'transport_days':
+                        transport_map = {}
+                        for r in rows_data:
+                            t_raw_name = r.get('الاسم الثلاثي', r.get('اسم الاستاذ', '')).strip()
+                            t_norm_key = normalize_name(t_raw_name)
+                            if t_raw_name:
+                                if t_norm_key not in transport_map: transport_map[t_norm_key] = {}
+                                for m_col in MONTH_COLUMNS:
+                                    found_val = None
+                                    for key, val in r.items():
+                                        if clean_column_name(key) == m_col:
+                                            found_val = val
+                                            break
+                                    if found_val is not None:
+                                        try: transport_map[t_norm_key][m_col] = float(found_val or 0)
+                                        except: transport_map[t_norm_key][m_col] = 0.0
+                                    else:
+                                        transport_map[t_norm_key][m_col] = 0.0
+                        directorate_excel_tables['transport_days']['monthly_transport'] = transport_map
+
                     if file_key == 'students_registered':
                         new_classes = {}
                         for r in rows_data:
                             c_name = r.get('الصف', r.get('Class', r.get('التخصص', 'غير مصنف')))
                             s_name = r.get('اسم الطالب الكامل', r.get('اسم الطالب', r.get('الاسم الثلاثي', r.get('الاسم', ''))))
                             if c_name and s_name and str(c_name) != 'nan' and str(s_name) != 'nan':
-                                if c_name not in new_classes:
-                                    new_classes[c_name] = []
-                                if s_name not in new_classes[c_name]:
-                                    new_classes[c_name].append(s_name)
-                        if new_classes:
-                            classes_students.update(new_classes)
+                                if c_name not in new_classes: new_classes[c_name] = []
+                                if s_name not in new_classes[c_name]: new_classes[c_name].append(s_name)
+                        if new_classes: classes_students.update(new_classes)
 
                     directorate_excel_tables[file_key] = {
                         "title": table_title,
@@ -574,7 +623,7 @@ def admin_dashboard():
                     }
 
                     save_to_disk()
-                    msg = f"تم رفع وتحديث ملف ({table_title}) بنجاح!"
+                    msg = f"تم رفع وتحديث ملف ({table_title}) وحفظ كافة البيانات بنجاح!"
                 except Exception as e:
                     msg = f"خطأ في قراءة ملف الإكسل: {e}"
 
@@ -625,6 +674,42 @@ def admin_dashboard():
             save_to_disk()
             msg = "تم إرسال التنبيه والتعميم بنجاح!"
 
+    monthly_data_map = directorate_excel_tables.get('executed_hours', {}).get('monthly_hours', {})
+    executed_hours_table_html = ""
+    if monthly_data_map:
+        m_headers = "".join([f"<th>ش {m}</th>" for m in MONTH_COLUMNS])
+        m_rows = ""
+        for norm_k, m_dict in monthly_data_map.items():
+            disp_name = norm_k
+            for t_info in teachers_db.values():
+                if normalize_name(t_info['name']) == norm_k:
+                    disp_name = t_info['name']
+                    break
+            m_tds = "".join([f"<td>{m_dict.get(m, 0):.0f}</td>" for m in MONTH_COLUMNS])
+            total_exec = sum(m_dict.values())
+            m_rows += f"<tr><td style='text-align:right; font-weight:bold;'>{disp_name}</td>{m_tds}<td style='background:#e3f2fd;'><b style='color:#0d47a1;'>{total_exec:.0f}</b></td></tr>"
+        executed_hours_table_html = f"<div style='overflow-x:auto;'><table><tr><th style='min-width:180px;'>الاسم الثلاثي</th>{m_headers}<th>المجموع</th></tr>{m_rows}</table></div>"
+    else:
+        executed_hours_table_html = "<p style='color:#666;'>لم يتم رفع ملف الساعات المنفذة بعد.</p>"
+
+    monthly_trans_map = directorate_excel_tables.get('transport_days', {}).get('monthly_transport', {})
+    transport_table_html = ""
+    if monthly_trans_map:
+        t_headers = "".join([f"<th>ش {m}</th>" for m in MONTH_COLUMNS])
+        t_rows = ""
+        for norm_k, m_dict in monthly_trans_map.items():
+            disp_name = norm_k
+            for t_info in teachers_db.values():
+                if normalize_name(t_info['name']) == norm_k:
+                    disp_name = t_info['name']
+                    break
+            t_tds = "".join([f"<td>{m_dict.get(m, 0):.0f} يوم</td>" for m in MONTH_COLUMNS])
+            total_days = sum(m_dict.values())
+            t_rows += f"<tr><td style='text-align:right; font-weight:bold;'>{disp_name}</td>{t_tds}<td style='background:#e8f5e9;'><b style='color:#2e7d32;'>{total_days:.0f} يوم</b></td></tr>"
+        transport_table_html = f"<div style='overflow-x:auto;'><table><tr><th style='min-width:180px;'>الاسم الثلاثي</th>{t_headers}<th>إجمالي الأيام</th></tr>{t_rows}</table></div>"
+    else:
+        transport_table_html = "<p style='color:#666;'>لم يتم رفع ملف أيام وبدل النقل بعد.</p>"
+
     parsed_sched = directorate_excel_tables.get('weekly_schedule', {}).get('parsed_schedule', {})
     late_teachers_rows = ""
     for u, t_info in teachers_db.items():
@@ -642,16 +727,8 @@ def admin_dashboard():
                     break
             if not submitted:
                 pending_subjects.append(f"{c_name} ({s_name})")
-        
         if pending_subjects:
-            late_teachers_rows += f"""
-            <tr>
-                <td><b>{t_info['name']}</b></td>
-                <td><code style='color:#0d47a1;'>{u}</code></td>
-                <td><span style='color:#c62828; font-weight:bold;'>⚠️ لم يسلم علامات: {", ".join(set(pending_subjects))}</span></td>
-                <td><a href="/report/official_sheet?teacher_username={u}" target="_blank" style="color:#0d47a1; font-weight:bold;">📄 معاينة التقرير</a></td>
-            </tr>
-            """
+            late_teachers_rows += f"<tr><td><b>{t_info['name']}</b></td><td><code>{u}</code></td><td><span style='color:#c62828; font-weight:bold;'>⚠️ لم يسلم علامات: {', '.join(set(pending_subjects))}</span></td><td><a href='/report/official_sheet?teacher_username={u}' target='_blank'>📄 معاينة</a></td></tr>"
 
     official_reports_list_html = ""
     for u, t_info in teachers_db.items():
@@ -664,23 +741,56 @@ def admin_dashboard():
             combo_key = f"{c_name} || {s_name}"
             if combo_key not in seen_combos:
                 seen_combos.add(combo_key)
-                official_reports_list_html += f"""
-                <tr>
-                    <td><b>{t_info['name']}</b></td>
-                    <td><b>{c_name}</b></td>
-                    <td><b style='color:#0d47a1;'>{s_name}</b></td>
-                    <td><a href="/report/official_sheet?class_name={c_name}&subject_name={s_name}&teacher_username={u}" target="_blank" style="background:#0d47a1; color:white; padding:5px 12px; border-radius:4px; text-decoration:none; font-size:12px; font-weight:bold;">📄 فتح طباعة التقرير الرسمية</a></td>
-                </tr>
-                """
+                official_reports_list_html += f"<tr><td><b>{t_info['name']}</b></td><td><b>{c_name}</b></td><td><b style='color:#0d47a1;'>{s_name}</b></td><td><a href='/report/official_sheet?class_name={c_name}&subject_name={s_name}&teacher_username={u}' target='_blank' style='background:#0d47a1; color:white; padding:5px 12px; border-radius:4px; text-decoration:none;'>📄 فتح التقرير الرسمي</a></td></tr>"
 
     attendance_rows = "".join([f"<tr><td><b>{k}</b></td><td style='color:#c62828;'>متغيبون: {v.get('absent', [])}</td></tr>" for k, v in attendance_db.items()])
-    teachers_rows = "".join([f"<tr><td><b>{t['name']}</b><br><small>الرقم الآلي: {t.get('auto_id','')}</small></td><td><code>{u}</code></td><td><b style='color:#d32f2f;'>{t['password']}</b></td><td>{'📱 مرتبط' if t.get('mobile_device') else 'غير مسجل'}</td></tr>" for u, t in teachers_db.items()])
-    field_rows = "".join([f"<tr><td><b>{fs['location']}</b><br><small>{fs['class_name']}</small></td><td>{fs['primary_teacher']}</td><td>{fs['status']}</td></tr>" for fs in reversed(field_sessions)])
+    teachers_rows = "".join([f"<tr><td><b>{t['name']}</b><br><small>رقم آلي: {t.get('auto_id','')}</small></td><td><code>{u}</code></td><td><b style='color:#d32f2f;'>{t['password']}</b></td><td>{'📱 مرتبط' if t.get('mobile_device') else 'غير مسجل'}</td></tr>" for u, t in teachers_db.items()])
+    
+    field_rows = "".join([f"<tr><td><b>{fs['location']}</b><br><small>{fs['class_name']}</small></td><td>👤 أساسي: <b style='color:#0d47a1;'>{fs['primary_teacher']}</b><br>{'👥 مساعد: <b style=\'color:#2e7d32;\'>' + fs['secondary_teacher'] + '</b>' if fs.get('secondary_teacher') else ''}</td><td>{fs['status']}</td></tr>" for fs in reversed(field_sessions)])
+    
     replies_html = "".join([f"<div style='background:#fff3e0; padding:10px; margin-bottom:8px; border-radius:6px;'><b>من: {r['teacher_name']}</b><br>{r['message']}</div>" for r in reversed(admin_replies)])
     
-    directorate_htmls = {k: f"<h4>📂 {v['title']}</h4><p>إجمالي السجلات: {len(v['data'])}</p>" for k, v in directorate_excel_tables.items()}
+    directorate_htmls = {}
+    for k, v in directorate_excel_tables.items():
+        cols = v.get('columns', [])
+        rows_d = v.get('data', [])
+        headers_th = "".join([f"<th>{c}</th>" for c in cols]) if cols else "<th>البيانات</th>"
+        body_tr = ""
+        if rows_d:
+            for r in rows_d[:50]:
+                tds = "".join([f"<td>{r.get(c, '')}</td>" for c in cols]) if cols else f"<td>{str(r)}</td>"
+                body_tr += f"<tr>{tds}</tr>"
+        else:
+            body_tr = "<tr><td colspan='1'>لا توجد بيانات مرفوعة بعد</td></tr>"
+        directorate_htmls[k] = f"<h4>📂 {v['title']}</h4><div style='overflow-x:auto;'><table><tr>{headers_th}</tr>{body_tr}</table></div><small>إجمالي السجلات: {len(rows_d)}</small>"
+
     teacher_opts = "".join([f"<option value='{u}'>{t['name']} ({u})</option>" for u, t in teachers_db.items()])
     locations_opts = "".join([f"<option value='{loc}'>{loc}</option>" for loc in TRAINING_LOCATIONS.keys()])
+
+    schedule_mapping = {}
+    for norm_t, items in parsed_sched.items():
+        t_user_key = None
+        t_disp_name = norm_t
+        for u, t_info in teachers_db.items():
+            if normalize_name(t_info['name']) == norm_t:
+                t_user_key = u
+                t_disp_name = t_info['name']
+                break
+        
+        for item in items:
+            c_full = item['class']
+            parts = c_full.split()
+            c_name = parts[0] if parts else c_full
+            major_name = " ".join(parts[1:]) if len(parts) > 1 else "عام"
+
+            if c_name not in schedule_mapping:
+                schedule_mapping[c_name] = {}
+            if major_name not in schedule_mapping[c_name]:
+                schedule_mapping[c_name][major_name] = []
+            
+            t_obj = {"username": t_user_key or norm_t, "name": t_disp_name}
+            if t_obj not in schedule_mapping[c_name][major_name]:
+                schedule_mapping[c_name][major_name].append(t_obj)
 
     admin_template = '''
     <!DOCTYPE html>
@@ -715,7 +825,7 @@ def admin_dashboard():
                 <h3 style="color:#0d47a1; margin-top:0;">📝 التقارير الرسمية لعلامات الطلاب (لائحة تقييم الطلاب للامتحان)</h3>
                 <table>
                     <tr><th>اسم الأستاذ</th><th>الصف والسنة</th><th>المادة التعليمية</th><th>عرض وطباعة التقرير الرسمي</th></tr>
-                    {{ official_reports_list_html | safe if official_reports_list_html else '<tr><td colspan="4">لم يتم رفع برنامج إكسل بعد</td></tr>' }}
+                    {{ official_reports_list_html | safe if official_reports_list_html else '<tr><td colspan="4">لم يتم رفع برنامج أسبوعي بعد</td></tr>' }}
                 </table>
             </div>
 
@@ -728,15 +838,20 @@ def admin_dashboard():
             </div>
 
             <div id="grantEditPermissionSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">🔓 منح إذن وموافقة للأستاذ لتعديل علامة صف/مادة</h3>
-                <form action="/admin/grant_edit_permission" method="POST">
+                <h3 style="color:#0d47a1; margin-top:0;">💡 التحكم بفتح وإغلاق إدخال العلامات للأستاذ (On / Off)</h3>
+                <form action="/admin/toggle_grade_permission" method="POST">
                     <label>اختر الأستاذ:</label>
                     <select name="target_user" required>{{ teacher_opts | safe }}</select>
-                    <label>اسم الصف والسنة:</label>
+                    <label>اسم الصف والمستوى:</label>
                     <input type="text" name="class_name" placeholder="مثال: BT1 الكهرباء" required>
                     <label>اسم المادة:</label>
-                    <input type="text" name="subject_name" placeholder="مثال: رياضيات" required>
-                    <button type="submit" style="background:#2e7d32; margin-top:10px;">🔓 منح الإذن والموافقة الآن</button>
+                    <input type="text" name="subject_name" placeholder="مثال: الرياضيات العامة" required>
+                    <label>حالة الضوء (الإذن):</label>
+                    <select name="action_type" required style="font-weight:bold; background:#e3f2fd;">
+                        <option value="open">🟢 فتح المجال (إضاءة الضوء ON للسماح بالإدخال)</option>
+                        <option value="close">🔴 إغلاق المجال (إطفاء الضوء OFF وقفل التعديل)</option>
+                    </select>
+                    <button type="submit" style="background:#2e7d32; margin-top:12px; font-size:15px;">💾 تنفيذ حالة الإذن فوراً</button>
                 </form>
             </div>
 
@@ -745,13 +860,30 @@ def admin_dashboard():
                 {{ directorate_htmls['students_registered'] | safe }}
             </div>
 
+            <div id="viewTeachersCards" class="card">
+                <h3 style="color:#0d47a1; margin-top:0;">📇 بطاقات الأساتذة والمعلومات الشخصية</h3>
+                {{ directorate_htmls['teachers_cards'] | safe }}
+                <hr style="margin:20px 0;">
+                {{ directorate_htmls['personal_info'] | safe }}
+            </div>
+
             <div id="viewWeeklySchedule" class="card">
                 <h3 style="color:#0d47a1; margin-top:0;">📅 البرنامج الأسبوعي الكامل</h3>
-                <p>تم استخراج كافة تفاصيل وحصص وأيام البرنامج الأسبوعي للأساتذة من ملف الإكسل بنجاح.</p>
+                {{ directorate_htmls['weekly_schedule'] | safe }}
+            </div>
+
+            <div id="viewExecutedHours" class="card">
+                <h3 style="color:#0d47a1; margin-top:0;">⏱️ الساعات المنفذة للأساتذة شهرياً</h3>
+                {{ executed_hours_table_html | safe }}
+            </div>
+
+            <div id="viewTransportDays" class="card">
+                <h3 style="color:#2e7d32; margin-top:0;">🚗 أيام الحضور وبدل النقل للأساتذة شهرياً</h3>
+                {{ transport_table_html | safe }}
             </div>
 
             <div id="teachersListSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">👨‍🏫 سجل الأساتذة</h3>
+                <h3 style="color:#0d47a1; margin-top:0;">👨‍🏫 سجل الأساتذة وعقود الساعات</h3>
                 <form method="POST" style="margin-bottom:15px;">
                     <input type="hidden" name="action" value="create_auto_accounts">
                     <button type="submit" style="background:#2e7d32;">⚡ توليد حسابات الأساتذة تلقائياً من إكسل البطاقات</button>
@@ -760,35 +892,54 @@ def admin_dashboard():
             </div>
 
             <div id="fieldSessionSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">🏥 التدريب الميداني (GPS)</h3>
+                <h3 style="color:#0d47a1; margin-top:0;">🏥 إضافة وإدارة الجلسات الميدانية والـ GPS</h3>
                 <form action="/admin/create_field_session" method="POST">
+                    <label><b>1. اختر المركز التدريبي:</b></label>
                     <select name="location" required>{{ locations_opts | safe }}</select>
-                    <input type="text" name="class_name" placeholder="الصف" required>
-                    <input type="text" name="major" placeholder="الاختصاص" required>
-                    <select name="primary_teacher" required>{{ teacher_opts | safe }}</select>
-                    <button type="submit" style="margin-top:10px;">تأكيد الجلسة</button>
+
+                    <label style="margin-top:10px; display:block;"><b>2. اختر الصف:</b></label>
+                    <select name="class_name" id="fieldClassSelect" onchange="onFieldClassChange()" required>
+                        <option value="">-- اختر الصف --</option>
+                    </select>
+
+                    <label style="margin-top:10px; display:block;"><b>3. اختر الاختصاص:</b></label>
+                    <select name="major" id="fieldMajorSelect" onchange="onFieldMajorChange()" required>
+                        <option value="">-- اختر الصف أولاً --</option>
+                    </select>
+
+                    <label style="margin-top:10px; display:block;"><b>4. اختر الأستاذ الأساسي للتدريب:</b></label>
+                    <select name="primary_teacher" id="fieldPrimaryTeacher" required>
+                        <option value="">-- اختر الاختصاص أولاً --</option>
+                    </select>
+
+                    <label style="margin-top:10px; display:block;"><b>5. اختر الأستاذ المساعد (اختياري):</b></label>
+                    <select name="secondary_teacher" id="fieldSecondaryTeacher">
+                        <option value="none">-- بدون أستاذ مساعد --</option>
+                    </select>
+
+                    <button type="submit" style="margin-top:15px; background:#2e7d32; font-size:15px;">✅ تأكيد وتكليف جلسة التدريب</button>
                 </form>
+
+                <hr style="margin:20px 0;">
+                <h4 style="color:#0d47a1;">📋 سجل جلسات التدريب الميداني</h4>
+                <table><tr><th>المركز والصف</th><th>الأساتذة المكلفون (أساسي ومساعد)</th><th>الحالة</th></tr>{{ field_rows | safe }}</table>
             </div>
 
-            <!-- نموذج الرفع المحدث الذي يتضمن كافة خيارات ملفات الإكسل الستة دون اختصار -->
             <div id="uploadDirectorateFilesSec" class="card">
                 <h3 style="color:#0d47a1; margin-top:0;">⚙️ رفع ملفات المديرية والبرنامج (Excel)</h3>
                 <form method="POST" enctype="multipart/form-data">
                     <input type="hidden" name="action" value="upload_directorate_file">
-                    
                     <label><b>حدد نوع جدول الإكسل المراد رفعه:</b></label>
                     <select name="file_key" required style="font-weight:bold; background:#e3f2fd;">
                         <option value="executed_hours">⏱️ 1. الساعات المنفذة للأساتذة</option>
                         <option value="students_registered">📂 2. الطلاب المسجلون</option>
                         <option value="personal_info">👤 3. المعلومات الشخصية</option>
-                        <option value="transport_days">🚗 4. أيام الحضور للأساتذة</option>
+                        <option value="transport_days">🚗 4. أيام الحضور وبدل النقل للأساتذة</option>
                         <option value="weekly_schedule">📅 5. برنامج أسبوعي مع الأساتذة والمواد</option>
                         <option value="teachers_cards">📇 6. بطاقات الأساتذة</option>
                     </select>
-
                     <label style="margin-top:12px; display:block;"><b>اختر ملف الإكسل (.xlsx أو .xls):</b></label>
                     <input type="file" name="excel_file" accept=".xlsx, .xls" required style="margin-top:5px;">
-                    
                     <button type="submit" style="background:#2e7d32; margin-top:15px; font-size:15px;">📥 رفع وتحديث الملف فوراً</button>
                 </form>
             </div>
@@ -824,6 +975,55 @@ def admin_dashboard():
         </div>
 
         <script>
+            let schedMap = {{ schedule_mapping | tojson }};
+
+            function initFieldDropdowns() {
+                let classSel = document.getElementById('fieldClassSelect');
+                if(!classSel) return;
+                classSel.innerHTML = '<option value="">-- اختر الصف --</option>';
+                Object.keys(schedMap).forEach(c => {
+                    classSel.innerHTML += `<option value="${c}">${c}</option>`;
+                });
+            }
+
+            function onFieldClassChange() {
+                let c = document.getElementById('fieldClassSelect').value;
+                let majorSel = document.getElementById('fieldMajorSelect');
+                let pTeachSel = document.getElementById('fieldPrimaryTeacher');
+                let sTeachSel = document.getElementById('fieldSecondaryTeacher');
+
+                majorSel.innerHTML = '<option value="">-- اختر الاختصاص --</option>';
+                pTeachSel.innerHTML = '<option value="">-- اختر الاختصاص أولاً --</option>';
+                sTeachSel.innerHTML = '<option value="none">-- بدون أستاذ مساعد --</option>';
+
+                if(c && schedMap[c]) {
+                    Object.keys(schedMap[c]).forEach(m => {
+                        majorSel.innerHTML += `<option value="${m}">${m}</option>`;
+                    });
+                }
+            }
+
+            function onFieldMajorChange() {
+                let c = document.getElementById('fieldClassSelect').value;
+                let m = document.getElementById('fieldMajorSelect').value;
+                let pTeachSel = document.getElementById('fieldPrimaryTeacher');
+                let sTeachSel = document.getElementById('fieldSecondaryTeacher');
+
+                pTeachSel.innerHTML = '<option value="">-- اختر الأستاذ الأساسي --</option>';
+                sTeachSel.innerHTML = '<option value="none">-- بدون أستاذ مساعد --</option>';
+
+                if(c && m && schedMap[c] && schedMap[c][m]) {
+                    schedMap[c][m].forEach(t => {
+                        pTeachSel.innerHTML += `<option value="${t.name}">${t.name}</option>`;
+                        sTeachSel.innerHTML += `<option value="${t.name}">${t.name}</option>`;
+                    });
+                }
+            }
+
+            document.addEventListener('DOMContentLoaded', function() {
+                initFieldDropdowns();
+            });
+
             function showSection(secId) {
                 document.querySelectorAll('.card').forEach(el => el.classList.remove('active'));
                 let target = document.getElementById(secId);
@@ -833,7 +1033,7 @@ def admin_dashboard():
     </body>
     </html>
     '''
-    return render_template_string(admin_template, attendance_rows=attendance_rows, teachers_rows=teachers_rows, late_teachers_rows=late_teachers_rows, official_reports_list_html=official_reports_list_html, field_rows=field_rows, replies_html=replies_html, teacher_opts=teacher_opts, locations_opts=locations_opts, directorate_htmls=directorate_htmls, msg=msg)
+    return render_template_string(admin_template, attendance_rows=attendance_rows, teachers_rows=teachers_rows, late_teachers_rows=late_teachers_rows, official_reports_list_html=official_reports_list_html, field_rows=field_rows, replies_html=replies_html, teacher_opts=teacher_opts, locations_opts=locations_opts, directorate_htmls=directorate_htmls, executed_hours_table_html=executed_hours_table_html, transport_table_html=transport_table_html, schedule_mapping=schedule_mapping, msg=msg)
 
 @app.route('/teacher', methods=['GET', 'POST'])
 def teacher_dashboard():
@@ -846,7 +1046,10 @@ def teacher_dashboard():
     msg = ''
 
     parsed_schedule = directorate_excel_tables.get('weekly_schedule', {}).get('parsed_schedule', {})
-    my_schedule_items = parsed_schedule.get(norm_t_name, [])
+    my_schedule_items = []
+    for sched_name, items in parsed_schedule.items():
+        if norm_t_name in sched_name or sched_name in norm_t_name or (len(norm_t_name.split()) > 0 and norm_t_name.split()[0] in sched_name):
+            my_schedule_items.extend(items)
 
     my_classes_map = {}
     for item in my_schedule_items:
@@ -864,40 +1067,35 @@ def teacher_dashboard():
             class_name = request.form.get('class_name')
             subject_name = request.form.get('subject_name')
             
-            if class_name in my_classes_map and subject_name in my_classes_map[class_name]:
+            perm_key = f"{username} || {class_name} || {subject_name}"
+            is_open = grade_edit_permissions.get(perm_key, False)
+            already_submitted = any(f"{st} || {class_name} || {subject_name}" in grades_db for st in classes_students.get(class_name, []))
+            
+            if already_submitted and not is_open:
+                msg = "🔴 عذراً! مجال إدخال وتعديل العلامات مغلق من قبل الإدارة (الضوء مطفأ). يرجى مراجعة المدير لفتح المجال."
+            else:
                 students = classes_students.get(class_name, [])
-                perm_key = f"{username} || {class_name} || {subject_name}"
-                is_granted = grade_edit_permissions.get(perm_key, False)
-                already_submitted = any(f"{st} || {class_name} || {subject_name}" in grades_db for st in students)
-                
-                if already_submitted and not is_granted:
-                    msg = "عذراً! لقد قمت برصد وتسليم العلامات لهذه المادة سابقاً، ولا يمكنك التعديل إلا بعد أخذ إذن وموافقة المدير."
-                else:
-                    for st in students:
-                        g_val = request.form.get(f"grade_{st}")
-                        note_val = request.form.get(f"note_{st}", '')
-                        g_key = f"{st} || {class_name} || {subject_name}"
-                        
-                        existing = grades_db.get(g_key, {})
-                        first_g = existing.get('grade', g_val)
-                        mod_g = g_val if already_submitted else ''
-                        
-                        grades_db[g_key] = {
-                            "student": st,
-                            "class": class_name,
-                            "subject": subject_name,
-                            "grade": first_g,
-                            "modified_grade": mod_g,
-                            "note": note_val,
-                            "teacher": username,
-                            "submitted_at": datetime.now().strftime('%Y-%m-%d %H:%M')
-                        }
+                for st in students:
+                    g_val = request.form.get(f"grade_{st}")
+                    note_val = request.form.get(f"note_{st}", '')
+                    g_key = f"{st} || {class_name} || {subject_name}"
                     
-                    if is_granted:
-                        grade_edit_permissions[perm_key] = False
-                        
-                    save_to_disk()
-                    msg = "تم حفظ ورصد علامات وملاحظات الطلاب بنجاح!"
+                    existing = grades_db.get(g_key, {})
+                    first_g = existing.get('grade', g_val)
+                    mod_g = g_val if already_submitted else ''
+                    
+                    grades_db[g_key] = {
+                        "student": st,
+                        "class": class_name,
+                        "subject": subject_name,
+                        "grade": first_g,
+                        "modified_grade": mod_g,
+                        "note": note_val,
+                        "teacher": username,
+                        "submitted_at": datetime.now().strftime('%Y-%m-%d %H:%M')
+                    }
+                save_to_disk()
+                msg = "🟢 تم حفظ ورصد علامات الطلاب بنجاح وإرسالها للإدارة!"
 
         elif action == 'submit_class_attendance':
             class_name = request.form.get('class_name')
@@ -926,9 +1124,38 @@ def teacher_dashboard():
     schedule_html = ""
     if my_schedule_items:
         s_rows = "".join([f"<tr><td><b>{item['day']}</b></td><td>{item['period']}</td><td>{item['class']}</td><td><b style='color:#0d47a1;'>{item['subject']}</b></td></tr>" for item in my_schedule_items])
-        schedule_html = f"<div class='card' style='border-top:4px solid #2e7d32;'><h4 style='color:#2e7d32; margin-top:0;'>📅 برنامجي الأسبوعي الخطي والمواد الخاصة بي:</h4><table><tr><th>اليوم</th><th>الحصة</th><th>الصف والمستوى</th><th>المادة</th></tr>{s_rows}</table></div>"
+        schedule_html = f"<div class='card' style='border-top:4px solid #2e7d32;'><h4 style='color:#2e7d32; margin-top:0;'>📅 برنامجي الأسبوعي والمواد الخاصة بي:</h4><table><tr><th>اليوم</th><th>الحصة</th><th>الصف والمستوى</th><th>المادة</th></tr>{s_rows}</table></div>"
     else:
-        schedule_html = "<div class='card'><p style='color:#777;'>لم يتم رفع البرنامج الأسبوعي أو لم يتم العثور على حصص مرتبطة باسمك بعد. يرجى التأكد من رفع ملف البرنامج الأسبوعي من لوحة الإدارة.</p></div>"
+        schedule_html = "<div class='card'><p style='color:#c62828; font-weight:bold;'>⚠️ لم يتم العثور على حصص مرتبطة باسمك في جدول البرنامج الأسبوعي المرفوع. تأكد من رفع ملف البرنامج الأسبوعي من لوحة الإدارة.</p></div>"
+
+    my_monthly_hours = user_data.get('monthly_hours', {})
+    total_exec_hrs = sum(my_monthly_hours.values()) if my_monthly_hours else 0
+    contract_limit = user_data.get('contract_hours', 300)
+
+    transport_map_all = directorate_excel_tables.get('transport_days', {}).get('monthly_transport', {})
+    my_transport_dict = {}
+    for norm_k, trans_d in transport_map_all.items():
+        if norm_k in norm_t_name or norm_t_name in norm_k:
+            my_transport_dict = trans_d
+            break
+    total_trans_days = sum(my_transport_dict.values()) if my_transport_dict else 0
+
+    teacher_finance_html = f"""
+    <div class='card' style='border-top:4px solid #0d47a1;'>
+        <h4 style='color:#0d47a1; margin-top:0;'>📊 رصيدي المالي والساعات المنفذة وبدلات النقل:</h4>
+        <div style='display:flex; gap:15px; flex-wrap:wrap; margin-top:10px;'>
+            <div style='flex:1; background:#e3f2fd; padding:12px; border-radius:6px; text-align:center;'>
+                <div style='font-size:13px; color:#555;'>إجمالي الساعات المنفذة</div>
+                <div style='font-size:20px; font-weight:bold; color:#0d47a1; margin-top:4px;'>{total_exec_hrs:.0f} ساعة</div>
+                <small style='color:#666;'>من أصل {contract_limit} ساعة</small>
+            </div>
+            <div style='flex:1; background:#e8f5e9; padding:12px; border-radius:6px; text-align:center;'>
+                <div style='font-size:13px; color:#555;'>إجمالي أيام وحضور النقل</div>
+                <div style='font-size:20px; font-weight:bold; color:#2e7d32; margin-top:4px;'>{total_trans_days:.0f} يوم</div>
+            </div>
+        </div>
+    </div>
+    """
 
     raw_notifs = user_data.get('notifications', [])
     notifs = "".join([f"<div style='background:#e3f2fd; padding:10px; margin-bottom:6px; border-radius:6px; font-weight:bold; color:#0d47a1;'>🔔 {str(n)}</div>" for n in reversed(raw_notifs)]) if raw_notifs else "<p style='color:#666;'>لا توجد تعاميم جديدة.</p>"
@@ -956,10 +1183,14 @@ def teacher_dashboard():
             <a href="/logout" style="color:#ffcdd2; background:#c62828; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px;">خروج</a>
         </div>
 
+        <audio id="notifSound" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" preload="auto"></audio>
+
         <div style="padding:15px;">
             {% if msg %}<div style="background:#e8f5e9; color:#2e7d32; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold;">{{ msg }}</div>{% endif %}
 
             {{ pending_alerts_html | safe }}
+
+            {{ teacher_finance_html | safe }}
 
             {{ schedule_html | safe }}
 
@@ -1103,7 +1334,7 @@ def teacher_dashboard():
     </body>
     </html>
     """
-    return render_template_string(teacher_template, t_name=t_name, msg=msg, my_class_opts=my_class_opts, my_classes_map=my_classes_map, pending_alerts_html=pending_alerts_html, schedule_html=schedule_html, notifs=notifs)
+    return render_template_string(teacher_template, t_name=t_name, msg=msg, my_class_opts=my_class_opts, my_classes_map=my_classes_map, pending_alerts_html=pending_alerts_html, schedule_html=schedule_html, teacher_finance_html=teacher_finance_html, notifs=notifs)
 
 @app.route('/logout')
 def logout():
