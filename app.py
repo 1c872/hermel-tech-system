@@ -44,13 +44,14 @@ students_db = []
 field_sessions = []
 MONTH_COLUMNS = ["10", "11", "12", "01", "02", "03", "04", "05", "06", "07", "08"]
 
+# جميع جداول الإكسل الستة المعتمدة لديك
 directorate_excel_tables = {
+    "executed_hours": {"title": "الساعات المنفذة للأساتذة", "columns": [], "data": [], "monthly_hours": {}},
     "students_registered": {"title": "الطلاب المسجلون", "columns": [], "data": []},
-    "teachers_cards": {"title": "بطاقات الاساتذة", "columns": [], "data": []},
     "personal_info": {"title": "المعلومات الشخصية", "columns": [], "data": []},
-    "weekly_schedule": {"title": "برنامج اسبوعي مع الاساتذة والمواد", "columns": [], "data": [], "parsed_schedule": {}},
-    "executed_hours": {"title": "الساعات المنفذة للاساتذة", "columns": [], "data": [], "monthly_hours": {}},
-    "transport_days": {"title": "أيام النقل للاساتذة شهرياً", "columns": [], "data": [], "monthly_transport": {}}
+    "transport_days": {"title": "أيام الحضور للأساتذة", "columns": [], "data": [], "monthly_transport": {}},
+    "weekly_schedule": {"title": "برنامج أسبوعي مع الأساتذة والمواد", "columns": [], "data": [], "parsed_schedule": {}},
+    "teachers_cards": {"title": "بطاقات الأساتذة", "columns": [], "data": []}
 }
 
 def clean_column_name(col):
@@ -131,7 +132,7 @@ load_from_disk()
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# 📊 دالة ذكية ومطورة لقراءة كافة تفاصيل البرنامج الأسبوعي من إكسل المديرية دون أي نقص
+# دالة سحب كافة تفاصيل البرنامج الأسبوعي من الإكسل بالكامل
 def parse_weekly_schedule(df):
     parsed_teachers = {}
     current_class = "عام"
@@ -139,13 +140,11 @@ def parse_weekly_schedule(df):
     for _, row in df.iterrows():
         first_col = str(row.iloc[0]).strip() if pd.notna(row.iloc[0]) else ""
         
-        # التقاط اسم الصف أو المستوى إذا وجد في العمود الأول
         if any(keyword in first_col for keyword in ["المستوى", "الصف", "BT", "TS", "LT", "BP", "الفرع", "الاختصاص"]):
             current_class = first_col
             continue
         
         day_name = first_col
-        # التحقق من أيام الأسبوع
         if any(d in day_name for d in ["الاثنين", "الثلاثاء", "الاربعاء", "الخميس", "الجمعة", "السبت", "الأحد", "الإثنين", "الأربعاء"]):
             for col_idx in range(1, len(row)):
                 cell_val = row.iloc[col_idx]
@@ -155,7 +154,6 @@ def parse_weekly_schedule(df):
                         teacher_name = cell_str
                         subject_name = "مادة تعليمية"
                         
-                        # إذا كانت الخلية تحتوي على فاصل بين الأستاذ والمادة
                         if "/***/" in cell_str:
                             parts = cell_str.split("/***/")
                             teacher_name = parts[0].strip()
@@ -337,7 +335,7 @@ def check_notifications():
     user_data = teachers_db.get(username, {})
     return jsonify({'notifications': user_data.get('notifications', [])})
 
-# إصدار تقرير رسمي مطابق لنموذج المديرية
+# التقرير الرسمي المعتمد لعلامات الطلاب
 @app.route('/report/official_sheet')
 def official_report_sheet():
     class_name = request.args.get('class_name', '')
@@ -534,16 +532,7 @@ def admin_dashboard():
                         row_dict = {col: "" if pd.isna(row[col]) else str(row[col]).strip() for col in df_renamed.columns}
                         rows_data.append(row_dict)
                     
-                    title_map = {
-                        "students_registered": "الطلاب المسجلون",
-                        "teachers_cards": "بطاقات الاساتذة",
-                        "personal_info": "المعلومات الشخصية",
-                        "weekly_schedule": "برنامج اسبوعي مع الاساتذة والمواد",
-                        "executed_hours": "الساعات المنفذة للاساتذة",
-                        "transport_days": "أيام النقل للاساتذة شهرياً"
-                    }
-                    
-                    table_title = title_map.get(file_key, "ملف المديرية")
+                    table_title = directorate_excel_tables[file_key]['title']
                     
                     if file_key in ['teachers_cards', 'personal_info']:
                         for r in rows_data:
@@ -585,7 +574,7 @@ def admin_dashboard():
                     }
 
                     save_to_disk()
-                    msg = f"تم رفع وتحديث ملف ({table_title}) واستخراج كافة التفاصيل والصفوف والمواد بنجاح تام!"
+                    msg = f"تم رفع وتحديث ملف ({table_title}) بنجاح!"
                 except Exception as e:
                     msg = f"خطأ في قراءة ملف الإكسل: {e}"
 
@@ -636,7 +625,6 @@ def admin_dashboard():
             save_to_disk()
             msg = "تم إرسال التنبيه والتعميم بنجاح!"
 
-    # قائمة الأساتذة المتأخرين عن تسليم العلامات
     parsed_sched = directorate_excel_tables.get('weekly_schedule', {}).get('parsed_schedule', {})
     late_teachers_rows = ""
     for u, t_info in teachers_db.items():
@@ -782,17 +770,26 @@ def admin_dashboard():
                 </form>
             </div>
 
+            <!-- نموذج الرفع المحدث الذي يتضمن كافة خيارات ملفات الإكسل الستة دون اختصار -->
             <div id="uploadDirectorateFilesSec" class="card">
                 <h3 style="color:#0d47a1; margin-top:0;">⚙️ رفع ملفات المديرية والبرنامج (Excel)</h3>
                 <form method="POST" enctype="multipart/form-data">
                     <input type="hidden" name="action" value="upload_directorate_file">
-                    <select name="file_key" required>
-                        <option value="weekly_schedule">📅 البرنامج الأسبوعي الكامل (استخراج الصفوف والمواد لكل أستاذ)</option>
-                        <option value="students_registered">📂 الطلاب المسجلون</option>
-                        <option value="teachers_cards">📇 بطاقات الاساتذة</option>
+                    
+                    <label><b>حدد نوع جدول الإكسل المراد رفعه:</b></label>
+                    <select name="file_key" required style="font-weight:bold; background:#e3f2fd;">
+                        <option value="executed_hours">⏱️ 1. الساعات المنفذة للأساتذة</option>
+                        <option value="students_registered">📂 2. الطلاب المسجلون</option>
+                        <option value="personal_info">👤 3. المعلومات الشخصية</option>
+                        <option value="transport_days">🚗 4. أيام الحضور للأساتذة</option>
+                        <option value="weekly_schedule">📅 5. برنامج أسبوعي مع الأساتذة والمواد</option>
+                        <option value="teachers_cards">📇 6. بطاقات الأساتذة</option>
                     </select>
-                    <input type="file" name="excel_file" accept=".xlsx, .xls" required style="margin-top:10px;">
-                    <button type="submit" style="background:#2e7d32; margin-top:12px;">📥 رفع وتحديث البيانات واستخراج التفاصيل</button>
+
+                    <label style="margin-top:12px; display:block;"><b>اختر ملف الإكسل (.xlsx أو .xls):</b></label>
+                    <input type="file" name="excel_file" accept=".xlsx, .xls" required style="margin-top:5px;">
+                    
+                    <button type="submit" style="background:#2e7d32; margin-top:15px; font-size:15px;">📥 رفع وتحديث الملف فوراً</button>
                 </form>
             </div>
 
