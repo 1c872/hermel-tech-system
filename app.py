@@ -11,13 +11,15 @@ from flask import Flask, render_template_string, request, redirect, url_for, ses
 app = Flask(__name__)
 app.secret_key = 'hermel_tech_school_shams_secret_key_2026'
 
-UPLOAD_FOLDER = 'uploads'
+# تحديد المسارات المطلقة الثابتة لضمان عدم ضياع البيانات عند إيقاف التشغيل
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
 ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'xlsx', 'xls', 'json'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-DB_FILE = os.path.join(os.getcwd(), 'database.json')
-BACKUP_FILE = os.path.join(os.getcwd(), 'database_backup.json')
+DB_FILE = os.path.join(BASE_DIR, 'database.json')
+BACKUP_FILE = os.path.join(BASE_DIR, 'database_backup.json')
 
 TRAINING_LOCATIONS = {
     "مستشفى الهرمل الحكومي": {"lat": 34.381283, "lng": 36.424456, "radius_meters": 300},
@@ -116,9 +118,11 @@ def save_to_disk():
 def load_from_disk():
     global teachers_db, grades_db, attendance_db, teacher_classes_map, admin_replies, admin_credentials, classes_students
     global academic_years_db, current_academic_year, students_db, field_sessions, teacher_absences_log, directorate_excel_tables
-    if os.path.exists(DB_FILE):
+    
+    target_file = DB_FILE if os.path.exists(DB_FILE) else (BACKUP_FILE if os.path.exists(BACKUP_FILE) else None)
+    if target_file:
         try:
-            with open(DB_FILE, 'r', encoding='utf-8') as f:
+            with open(target_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 teachers_db = data.get('teachers_db', {})
                 grades_db = data.get('grades_db', {})
@@ -135,7 +139,7 @@ def load_from_disk():
                 directorate_excel_tables = data.get('directorate_excel_tables', directorate_excel_tables)
                 return True
         except Exception as e:
-            print(f"Error loading database file: {e}")
+            print(f"Error loading database: {e}")
     return False
 
 load_from_disk()
@@ -573,10 +577,7 @@ def admin_dashboard():
                     msg = f"خطأ في قراءة ملف الإكسل: {e}"
 
         elif action == 'create_auto_accounts':
-            # تنظيف قائمة الأساتذة الحالية وإبقاء الأساتذة الحقيقيين فقط
             teachers_db.clear()
-            
-            # 1. التوليد من ملف بطاقات الأساتذة إن وجد
             t_cards = directorate_excel_tables.get('teachers_cards', {}).get('data', [])
             count = 0
             for card in t_cards:
@@ -602,7 +603,6 @@ def admin_dashboard():
                         }
                         count += 1
             
-            # 2. التوليد من جدول "الاستاذ والمواد"
             parsed_sub = directorate_excel_tables.get('teachers_and_subjects', {}).get('parsed_schedule', {})
             for norm_k, items in parsed_sub.items():
                 raw_name = items[0]['class'] if items else norm_k
@@ -694,7 +694,6 @@ def admin_dashboard():
     else:
         transport_table_html = "<p style='color:#666;'>لم يتم رفع ملف النقل بعد.</p>"
 
-    # ترتيب الأساتذة أبجدياً (أ - ي)
     sorted_teachers_list = sorted(teachers_db.items(), key=lambda x: x[1]['name'])
     teachers_rows = ""
     for u, t in sorted_teachers_list:
