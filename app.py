@@ -57,8 +57,7 @@ directorate_excel_tables = {
 }
 
 def clean_column_name(col):
-    col_str = str(col).strip()
-    col_str = col_str.replace("&#x27;", "").replace("'", "").replace('"', '')
+    col_str = str(col).strip().replace("&#x27;", "").replace("'", "").replace('"', '')
     col_str = re.sub(r'^ش\s*', '', col_str)
     if len(col_str) == 1 and col_str.isdigit():
         col_str = '0' + col_str
@@ -260,7 +259,7 @@ HEADER_VTE_HTML = '''
 <style>
     .dropdown { position: relative; display: inline-block; }
     .dropbtn { background-color: #1565c0; color: white; padding: 12px 16px; font-size: 14px; border: none; cursor: pointer; font-weight: bold; font-family: inherit; }
-    .dropdown:hover .dropbtn { background-color: #0d47a1; }
+    .dropdown:hover { background-color: #0d47a1; }
     .dropdown-content { display: none; position: absolute; background-color: #ffffff; min-width: 250px; box-shadow: 0px 8px 16px rgba(0,0,0,0.2); z-index: 100; border-radius: 0 0 6px 6px; }
     .dropdown-content a { color: #333; padding: 10px 15px; text-decoration: none; display: block; font-size: 13.5px; border-bottom: 1px solid #f0f0f0; }
     .dropdown-content a:hover { background-color: #e3f2fd; color: #0d47a1; font-weight: bold; }
@@ -360,7 +359,6 @@ def download_backup():
 @app.route('/admin/create_field_session', methods=['POST'])
 def create_field_session():
     if session.get('role') != 'admin': return redirect(url_for('login'))
-    
     p_teacher = request.form.get('primary_teacher')
     s_teacher = request.form.get('secondary_teacher')
     
@@ -415,7 +413,6 @@ def admin_dashboard():
             if file and allowed_file(file.filename) and file_key in directorate_excel_tables:
                 try:
                     df = pd.read_excel(file)
-                    
                     col_mapping = {}
                     clean_columns = []
                     for original_col in df.columns:
@@ -424,7 +421,6 @@ def admin_dashboard():
                         clean_columns.append(c_cleaned)
                     
                     df_renamed = df.rename(columns=col_mapping)
-                    
                     rows_data = []
                     for _, row in df_renamed.iterrows():
                         row_dict = {}
@@ -442,7 +438,6 @@ def admin_dashboard():
                         "executed_hours": "الساعات المنفذة للاساتذة",
                         "transport_days": "أيام النقل للاساتذة شهرياً"
                     }
-                    
                     table_title = title_map.get(file_key, "ملف المديرية")
                     
                     if file_key in ['teachers_cards', 'personal_info']:
@@ -452,7 +447,7 @@ def admin_dashboard():
                             t_norm_key = normalize_name(t_raw_name)
                             allowed_hrs = r.get('عدد الساعات المسموح بها', r.get('الساعات المسموح بها', r.get('Maxhoures', '300')))
                             
-                            if t_raw_name:
+                            if t_raw_name and len(t_raw_name.split()) >= 2:
                                 user_id = None
                                 for u, t_info in teachers_db.items():
                                     if normalize_name(t_info['name']) == t_norm_key:
@@ -578,22 +573,26 @@ def admin_dashboard():
                     msg = f"خطأ في قراءة ملف الإكسل: {e}"
 
         elif action == 'create_auto_accounts':
+            # تنظيف قائمة الأساتذة الحالية وإبقاء الأساتذة الحقيقيين فقط
+            teachers_db.clear()
+            
+            # 1. التوليد من ملف بطاقات الأساتذة إن وجد
             t_cards = directorate_excel_tables.get('teachers_cards', {}).get('data', [])
             count = 0
             for card in t_cards:
                 name = card.get('الاسم الثلاثي', card.get('الاسم', '')).strip()
-                auto_id = clean_auto_id(card.get('الرقم الالي', card.get('الرقم الآلي', card.get('رقم الاستاذ', '123456'))))
+                auto_id = clean_auto_id(card.get('الرقم الالي', card.get('الرقم الآلي', card.get('رقم الاستاذ', ''))))
                 allowed_hrs = card.get('عدد الساعات المسموح بها', card.get('الساعات المسموح بها', card.get('Maxhoures', 300)))
                 try: c_hrs_val = int(float(allowed_hrs))
                 except: c_hrs_val = 300
 
-                if name:
+                if name and len(name.split()) >= 2:
                     user_id = f"teacher_{len(teachers_db) + 1}"
                     if not any(normalize_name(t['name']) == normalize_name(name) for t in teachers_db.values()):
                         teachers_db[user_id] = {
                             "name": name,
-                            "auto_id": auto_id,
-                            "password": auto_id if auto_id else "123456",
+                            "auto_id": auto_id if auto_id else f"100{len(teachers_db)+1}",
+                            "password": auto_id if auto_id else f"100{len(teachers_db)+1}",
                             "subject": card.get('المادة', 'عام'),
                             "mobile_device": "",
                             "pc_device": "",
@@ -602,8 +601,30 @@ def admin_dashboard():
                             "contract_hours": c_hrs_val
                         }
                         count += 1
+            
+            # 2. التوليد من جدول "الاستاذ والمواد"
+            parsed_sub = directorate_excel_tables.get('teachers_and_subjects', {}).get('parsed_schedule', {})
+            for norm_k, items in parsed_sub.items():
+                raw_name = items[0]['class'] if items else norm_k
+                exists = any(normalize_name(t['name']) == norm_k for t in teachers_db.values())
+                if not exists and raw_name:
+                    u_id = f"teacher_{len(teachers_db) + 1}"
+                    a_pwd = f"100{len(teachers_db)+1}"
+                    teachers_db[u_id] = {
+                        "name": raw_name,
+                        "auto_id": a_pwd,
+                        "password": a_pwd,
+                        "subject": items[0]['subject'] if items else "عام",
+                        "mobile_device": "",
+                        "pc_device": "",
+                        "notifications": [],
+                        "monthly_hours": {},
+                        "contract_hours": 300
+                    }
+                    count += 1
+
             save_to_disk()
-            msg = f"تم توليد ({count}) حساب جديد للأساتذة بدون أي فاصلة عشرية!"
+            msg = f"تم إعادة ضبط وتوليد ({count}) حساب للأساتذة فقط وبكل دقة!"
 
         elif action == 'reset_teacher_device':
             target_user = request.form.get('target_user')
@@ -813,7 +834,7 @@ def admin_dashboard():
                 <h3 style="color:#0d47a1; margin-top:0;">👨‍🏫 سجل الأساتذة وحسابات الدخول (مرتبة أبجدياً أ - ي)</h3>
                 <form method="POST" style="margin-bottom:15px;">
                     <input type="hidden" name="action" value="create_auto_accounts">
-                    <button type="submit" style="background:#2e7d32;">⚡ توليد حسابات الأساتذة تلقائياً (بدون .0)</button>
+                    <button type="submit" style="background:#2e7d32;">⚡ توليد حسابات الأساتذة فقط تلقائياً (من جدول الأساتذة والبطاقات)</button>
                 </form>
                 <table>
                     <tr>
@@ -852,11 +873,11 @@ def admin_dashboard():
                     <input type="hidden" name="action" value="upload_directorate_file">
                     <label><b>حدد نوع الملف المراد رفعه:</b></label>
                     <select name="file_key" required style="font-weight:bold; background:#e3f2fd;">
-                        <option value="students_registered">📂 1. الطلاب المسجلون</option>
+                        <option value="teachers_and_subjects">📋 1. الاستاذ والمواد (التوزيع الرسمي للأساتذة)</option>
                         <option value="teachers_cards">📇 2. بطاقات الاساتذة</option>
-                        <option value="personal_info">👤 3. المعلومات الشخصية</option>
-                        <option value="weekly_schedule">📅 4. البرنامج الأسبوعي مع الاساتذة والمواد</option>
-                        <option value="teachers_and_subjects">📋 5. الاستاذ والمواد (التوزيع الرسمي)</option>
+                        <option value="students_registered">📂 3. الطلاب المسجلون</option>
+                        <option value="personal_info">👤 4. المعلومات الشخصية</option>
+                        <option value="weekly_schedule">📅 5. البرنامج الأسبوعي مع الاساتذة والمواد</option>
                         <option value="executed_hours">⏱️ 6. الساعات المنفذة للاساتذة</option>
                         <option value="transport_days">🚗 7. أيام النقل للاساتذة شهرياً</option>
                     </select>
@@ -1231,7 +1252,7 @@ def uploaded_file(filename):
 @app.route('/logout')
 def logout():
     session.clear()
-    return redirect(url_for('logout'))
+    return redirect(url_for('login'))
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
