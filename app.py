@@ -11,7 +11,6 @@ from flask import Flask, render_template_string, request, redirect, url_for, ses
 app = Flask(__name__)
 app.secret_key = 'hermel_tech_school_shams_secret_key_2026'
 
-# تحديد المسارات المطلقة الثابتة لضمان عدم ضياع البيانات عند إيقاف التشغيل
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
 ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'xlsx', 'xls', 'json'}
@@ -478,27 +477,6 @@ def admin_dashboard():
                     if file_key == 'teachers_and_subjects':
                         parsed_sub = parse_teachers_and_subjects_smart(df)
                         directorate_excel_tables['teachers_and_subjects']['parsed_schedule'] = parsed_sub
-                        for norm_key, items in parsed_sub.items():
-                            raw_t_name = items[0]['class']
-                            for _, r_item in df.iterrows():
-                                if normalize_name(r_item.iloc[0]) == norm_key:
-                                    raw_t_name = str(r_item.iloc[0]).strip()
-                                    break
-                            exists = any(normalize_name(t['name']) == norm_key for t in teachers_db.values())
-                            if not exists:
-                                u_id = f"teacher_{len(teachers_db) + 1}"
-                                a_pwd = f"100{len(teachers_db)+1}"
-                                teachers_db[u_id] = {
-                                    "name": raw_t_name,
-                                    "auto_id": a_pwd,
-                                    "password": a_pwd,
-                                    "subject": items[0]['subject'],
-                                    "mobile_device": "",
-                                    "pc_device": "",
-                                    "notifications": [],
-                                    "monthly_hours": {},
-                                    "contract_hours": 300
-                                }
 
                     if file_key == 'executed_hours':
                         monthly_map = {}
@@ -580,6 +558,8 @@ def admin_dashboard():
             teachers_db.clear()
             t_cards = directorate_excel_tables.get('teachers_cards', {}).get('data', [])
             count = 0
+            
+            # التوليد حصراً من بطاقات الأساتذة (teachers_cards) لتجنب أي اختلاط بأسماء الطلاب
             for card in t_cards:
                 name = card.get('الاسم الثلاثي', card.get('الاسم', '')).strip()
                 auto_id = clean_auto_id(card.get('الرقم الالي', card.get('الرقم الآلي', card.get('رقم الاستاذ', ''))))
@@ -602,29 +582,9 @@ def admin_dashboard():
                             "contract_hours": c_hrs_val
                         }
                         count += 1
-            
-            parsed_sub = directorate_excel_tables.get('teachers_and_subjects', {}).get('parsed_schedule', {})
-            for norm_k, items in parsed_sub.items():
-                raw_name = items[0]['class'] if items else norm_k
-                exists = any(normalize_name(t['name']) == norm_k for t in teachers_db.values())
-                if not exists and raw_name:
-                    u_id = f"teacher_{len(teachers_db) + 1}"
-                    a_pwd = f"100{len(teachers_db)+1}"
-                    teachers_db[u_id] = {
-                        "name": raw_name,
-                        "auto_id": a_pwd,
-                        "password": a_pwd,
-                        "subject": items[0]['subject'] if items else "عام",
-                        "mobile_device": "",
-                        "pc_device": "",
-                        "notifications": [],
-                        "monthly_hours": {},
-                        "contract_hours": 300
-                    }
-                    count += 1
 
             save_to_disk()
-            msg = f"تم إعادة ضبط وتوليد ({count}) حساب للأساتذة فقط وبكل دقة!"
+            msg = f"تم توليد ({count}) حساب للأساتذة حصراً من بطاقات الأساتذة الرسمية!"
 
         elif action == 'reset_teacher_device':
             target_user = request.form.get('target_user')
@@ -833,7 +793,7 @@ def admin_dashboard():
                 <h3 style="color:#0d47a1; margin-top:0;">👨‍🏫 سجل الأساتذة وحسابات الدخول (مرتبة أبجدياً أ - ي)</h3>
                 <form method="POST" style="margin-bottom:15px;">
                     <input type="hidden" name="action" value="create_auto_accounts">
-                    <button type="submit" style="background:#2e7d32;">⚡ توليد حسابات الأساتذة فقط تلقائياً (من جدول الأساتذة والبطاقات)</button>
+                    <button type="submit" style="background:#2e7d32;">⚡ توليد حسابات الأساتذة حصراً من (بطاقات الأساتذة)</button>
                 </form>
                 <table>
                     <tr>
@@ -872,8 +832,8 @@ def admin_dashboard():
                     <input type="hidden" name="action" value="upload_directorate_file">
                     <label><b>حدد نوع الملف المراد رفعه:</b></label>
                     <select name="file_key" required style="font-weight:bold; background:#e3f2fd;">
-                        <option value="teachers_and_subjects">📋 1. الاستاذ والمواد (التوزيع الرسمي للأساتذة)</option>
-                        <option value="teachers_cards">📇 2. بطاقات الاساتذة</option>
+                        <option value="teachers_cards">📇 1. بطاقات الاساتذة</option>
+                        <option value="teachers_and_subjects">📋 2. الاستاذ والمواد (التوزيع الرسمي)</option>
                         <option value="students_registered">📂 3. الطلاب المسجلون</option>
                         <option value="personal_info">👤 4. المعلومات الشخصية</option>
                         <option value="weekly_schedule">📅 5. البرنامج الأسبوعي مع الاساتذة والمواد</option>
