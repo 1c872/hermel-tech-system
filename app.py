@@ -5,6 +5,7 @@ import math
 import shutil
 import re
 import pandas as pd
+import psycopg2
 from datetime import datetime
 from flask import Flask, render_template_string, request, redirect, url_for, session, send_from_directory, jsonify, send_file
 
@@ -19,6 +20,37 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 DB_FILE = os.path.join(BASE_DIR, 'database.json')
 BACKUP_FILE = os.path.join(BASE_DIR, 'database_backup.json')
+
+# إعدادات الاتصال بقاعدة بيانات Neon.tech (PostgreSQL)
+DATABASE_URL = os.environ.get('DATABASE_URL')
+
+def get_db_connection():
+    if not DATABASE_URL:
+        return None
+    try:
+        return psycopg2.connect(DATABASE_URL, sslmode='require')
+    except Exception as e:
+        print(f"PostgreSQL connection error: {e}")
+        return None
+
+def init_db_table():
+    conn = get_db_connection()
+    if conn:
+        try:
+            cur = conn.cursor()
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS app_storage (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                );
+            ''')
+            conn.commit()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            print(f"Error creating table: {e}")
+
+init_db_table()
 
 TRAINING_LOCATIONS = {
     "مستشفى الهرمل الحكومي": {"lat": 34.381283, "lng": 36.424456, "radius_meters": 300},
@@ -108,9 +140,22 @@ def save_to_disk():
             'teacher_absences_log': teacher_absences_log,
             'directorate_excel_tables': directorate_excel_tables
         }
-        with open(DB_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        shutil.copyfile(DB_FILE, BACKUP_FILE)
+        json_str = json.dumps(data, ensure_ascii=False)
+        
+        conn = get_db_connection()
+        if conn:
+            cur = conn.cursor()
+            cur.execute('''
+                INSERT INTO app_storage (key, value) VALUES ('main_state', %s)
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+            ''', (json_str,))
+            conn.commit()
+            cur.close()
+            conn.close()
+        else:
+            with open(DB_FILE, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            shutil.copyfile(DB_FILE, BACKUP_FILE)
     except Exception as e:
         print(f"Error saving database: {e}")
 
@@ -118,6 +163,33 @@ def load_from_disk():
     global teachers_db, grades_db, attendance_db, teacher_classes_map, admin_replies, admin_credentials, classes_students
     global academic_years_db, current_academic_year, students_db, field_sessions, teacher_absences_log, directorate_excel_tables
     
+    conn = get_db_connection()
+    if conn:
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT value FROM app_storage WHERE key = 'main_state';")
+            row = cur.fetchone()
+            cur.close()
+            conn.close()
+            if row and row[0]:
+                data = json.loads(row[0])
+                teachers_db = data.get('teachers_db', {})
+                grades_db = data.get('grades_db', {})
+                attendance_db = data.get('attendance_db', {})
+                teacher_classes_map = data.get('teacher_classes_map', {})
+                admin_replies = data.get('admin_replies', [])
+                admin_credentials = data.get('admin_credentials', {'username': 'admin', 'password': '123456'})
+                classes_students = data.get('classes_students', {})
+                academic_years_db = data.get('academic_years_db', academic_years_db)
+                current_academic_year = data.get('current_academic_year', current_academic_year)
+                students_db = data.get('students_db', [])
+                field_sessions = data.get('field_sessions', [])
+                teacher_absences_log = data.get('teacher_absences_log', [])
+                directorate_excel_tables = data.get('directorate_excel_tables', directorate_excel_tables)
+                return True
+        except Exception as e:
+            print(f"Error loading from PostgreSQL: {e}")
+
     target_file = DB_FILE if os.path.exists(DB_FILE) else (BACKUP_FILE if os.path.exists(BACKUP_FILE) else None)
     if target_file:
         try:
@@ -559,7 +631,6 @@ def admin_dashboard():
             t_cards = directorate_excel_tables.get('teachers_cards', {}).get('data', [])
             count = 0
             
-            # التوليد حصراً من بطاقات الأساتذة (teachers_cards) لتجنب أي اختلاط بأسماء الطلاب
             for card in t_cards:
                 name = card.get('الاسم الثلاثي', card.get('الاسم', '')).strip()
                 auto_id = clean_auto_id(card.get('الرقم الالي', card.get('الرقم الآلي', card.get('رقم الاستاذ', ''))))
