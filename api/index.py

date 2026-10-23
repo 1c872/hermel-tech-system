@@ -1,0 +1,4 @@
+from app import app
+
+# Vercel requires the WSGI entry point to be named 'app'
+app = app
