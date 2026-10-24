@@ -14,15 +14,16 @@ app.secret_key = 'hermel_tech_school_shams_secret_key_2026'
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# تعديل مسار مجلد الرفع ليتوافق مع Vercel (يستخدم /tmp لأن نظام الملفات للقراءة فقط)
-if os.environ.get('VERCEL'):
-    UPLOAD_FOLDER = '/tmp/uploads'
-else:
+# محاولة إنشاء مجلد الرفع محلياً، وإذا فشل بسبب الحماية (Read-only مثل Vercel) يتحول تلقائياً إلى /tmp
+try:
     UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+except OSError:
+    UPLOAD_FOLDER = '/tmp/uploads'
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'xlsx', 'xls', 'json'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 DB_FILE = os.path.join(BASE_DIR, 'database.json')
 BACKUP_FILE = os.path.join(BASE_DIR, 'database_backup.json')
