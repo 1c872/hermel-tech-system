@@ -57,7 +57,6 @@ def init_db_table():
 
 init_db_table()
 
-# قواعد البيانات المتكاملة (مع الحفاظ على الحفظ والاسترجاع)
 teachers_db = {}
 grades_db = {}            
 attendance_db = {}        
@@ -73,7 +72,6 @@ current_academic_year = "2025-2026"
 field_sessions = []
 teacher_absences_log = []
 
-# قاعدة بيانات المستشفيات ومواقع GPS والخدمات المحفوظة
 hospitals_gps_db = [
     {"name": "مستشفى الهرمل الحكومي", "type": "مستشفى رئيسي", "phone": "08-200111", "lat": 34.3901, "lng": 36.3822, "address": "الهرمل - الشارع العام"},
     {"name": "مستشفى البتول", "type": "مستشفى", "phone": "08-200222", "lat": 34.3850, "lng": 36.3800, "address": "الهرمل - الدورة"},
@@ -621,7 +619,6 @@ def admin_dashboard():
         """
 
     teachers_wa_opts = "".join([f"<option value='{t.get('phone', '')}'>{t['name']} - {t.get('phone', 'بدون رقم')}</option>" for u, t in sorted_teachers_list])
-    classes_wa_opts = "".join([f"<option value='{c}'>{c}</option>" for c in classes_students.keys()])
     year_select_opts = "".join([f"<option value='{y}' {'selected' if y==current_academic_year else ''}>{y}</option>" for y in academic_years_db])
 
     admin_template = '''
@@ -649,45 +646,46 @@ def admin_dashboard():
         <div class="container">
             {% if msg %}<div style="background:#e8f5e9; color:#2e7d32; padding:12px; border-radius:6px; font-weight:bold; margin-bottom:15px;">{{ msg }}</div>{% endif %}
 
-            <!-- مركز التواصل الفوري عبر الواتساب للطالب أو الصف -->
+            <!-- مركز التواصل الفوري عبر الواتساب بالمرحلة والصف والطلاب -->
             <div id="whatsAppCenterSec" class="card active">
-                <h3 style="color:#25D366; margin-top:0;">💬 مركز إرسال رسائل الواتساب (لطالب معين أو للصف كاملاً)</h3>
+                <h3 style="color:#25D366; margin-top:0;">💬 مركز إرسال رسائل الواتساب (حسب المرحلة والصف وتحديد الطلاب)</h3>
                 <div style="background:#f1f8e9; padding:15px; border-radius:8px; border:1px solid #c8e6c9;">
-                    <label><b>1. اختر الصف الدراسي:</b></label>
-                    <select id="waClassSelect" onchange="loadStudentsForWhatsApp()">
-                        <option value="">-- اختر الصف --</option>
-                        ''' + classes_wa_opts + '''
+                    <label><b>1. اختر المرحلة الدراسية:</b></label>
+                    <select id="stageSelect" onchange="filterClassesByStage()">
+                        <option value="">-- اختر المرحلة أولاً --</option>
+                        <option value="BT">البكالوريا الفنية (BT)</option>
+                        <option value="TS">الامتياز الفني (TS)</option>
+                        <option value="BP">التكميلية المهنية (BP)</option>
+                        <option value="LT">الإجازة الفنية (LT)</option>
+                        <option value="OTHER">كافة الصفوف الأخرى</option>
                     </select>
 
-                    <div style="margin-top:12px; display:flex; gap:15px; align-items:center;">
-                        <label style="cursor:pointer; font-weight:bold; color:#0d47a1;"><input type="radio" name="waTargetMode" value="student" checked onchange="toggleWaMode()"> مراسلة طالب معين</label>
-                        <label style="cursor:pointer; font-weight:bold; color:#2e7d32;"><input type="radio" name="waTargetMode" value="class" onchange="toggleWaMode()"> مراسلة الصف كاملاً (إرسال عام)</label>
+                    <label style="margin-top:12px; display:block;"><b>2. اختر الصف:</b></label>
+                    <select id="waClassSelect" onchange="loadStudentsCheckboxes()">
+                        <option value="">-- اختر المرحلة أولاً --</option>
+                    </select>
+
+                    <label style="margin-top:12px; display:block;"><b>3. لائحة طلاب الصف (اختر الطلاب أو المجموعة كاملة):</b></label>
+                    <div style="background:#fff; border:1px solid #ccc; border-radius:6px; padding:10px; max-height:220px; overflow-y:auto;" id="studentsCheckboxContainer">
+                        <p style="color:#777; font-size:13px; margin:0;">الرجاء اختيار الصف لعرض الطلاب...</p>
+                    </div>
+                    <div style="margin-top:8px; display:flex; gap:10px; align-items:center; background:#e8f5e9; padding:8px; border-radius:5px;">
+                        <label style="font-size:13.5px; font-weight:bold; cursor:pointer; color:#2e7d32; display:flex; align-items:center; gap:6px;">
+                            <input type="checkbox" id="selectAllStudents" onchange="toggleSelectAllStudents()"> ✅ تحديد الكل (إرسال للصف كاملاً)
+                        </label>
                     </div>
 
-                    <div id="singleStudentBox" style="margin-top:12px;">
-                        <label><b>2. اختر الطالب:</b></label>
-                        <select id="waStudentSelect" onchange="fillStudentPhone()">
-                            <option value="">-- اختر الطالب أولاً --</option>
-                        </select>
-                        <label style="margin-top:8px; display:block;"><b>رقم الهاتف للواتساب:</b></label>
-                        <input type="text" id="waPhoneInput" placeholder="مثال: 78918411">
-                    </div>
-
-                    <div id="classBroadcastBox" style="margin-top:12px; display:none; background:#e8f5e9; padding:10px; border-radius:6px;">
-                        <p style="margin:0; font-size:13px; color:#2e7d32; font-weight:bold;">📢 سيتم توجيه الرسالة لكل طلاب هذا الصف.</p>
-                    </div>
-
-                    <label style="margin-top:12px; display:block;"><b>3. نص الرسالة المراد إرسالها:</b></label>
+                    <label style="margin-top:12px; display:block;"><b>4. نص الرسالة المراد إرسالها:</b></label>
                     <textarea id="waMessageInput" placeholder="اكتب نص الرسالة هنا..." style="height:90px;"></textarea>
 
                     <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
                         <button type="button" onclick="setWaTemplate('absence')" style="background:#e65100; width:auto; font-size:12px;">قالب: إشعار غياب</button>
                         <button type="button" onclick="setWaTemplate('exam')" style="background:#1565c0; width:auto; font-size:12px;">قالب: تذكير امتحان</button>
-                        <button type="button" onclick="setWaTemplate('general')" style="background:#37474f; width:auto; font-size:12px;">قالب: تعميم عام للصف</button>
+                        <button type="button" onclick="setWaTemplate('general')" style="background:#37474f; width:auto; font-size:12px;">قالب: تعميم عام</button>
                     </div>
 
                     <div style="margin-top:15px;">
-                        <button type="button" onclick="sendWhatsAppMessage()" class="wa-btn" style="width:100%;">📲 فتح وتوجيه إلى الواتساب فوراً</button>
+                        <button type="button" onclick="sendWhatsAppMessage()" class="wa-btn" style="width:100%;">📲 فتح وتوجيه إلى الواتساب للطلاب المحددين</button>
                     </div>
                 </div>
             </div>
@@ -707,7 +705,7 @@ def admin_dashboard():
                 <button type="button" onclick="sendTeacherWhatsApp()" class="wa-btn" style="margin-top:12px; width:100%;">📲 إرسال عبر الواتساب</button>
             </div>
 
-            <!-- دليل المستشفيات والـ GPS (الميزة المدمجة) -->
+            <!-- دليل المستشفيات والـ GPS -->
             <div id="gpsHospitalsSec" class="card">
                 <h3 style="color:#0d47a1; margin-top:0;">🏥 دليل المستشفيات ومواقع GPS والخدمات</h3>
                 <p style="font-size:13px; color:#555;">المواقع الحيوية والمستشفيات في الهرمل ومحيط المعهد:</p>
@@ -829,42 +827,74 @@ def admin_dashboard():
                 if(target) target.classList.add('active');
             }
 
-            let currentClassStudents = [];
+            const allClasses = {{ classes_students.keys() | list | tojson }};
 
-            function loadStudentsForWhatsApp() {
-                let cls = document.getElementById('waClassSelect').value;
-                let stdSelect = document.getElementById('waStudentSelect');
-                stdSelect.innerHTML = '<option value="">جاري التحميل...</option>';
-                currentClassStudents = [];
-                if(!cls) return;
+            function filterClassesByStage() {
+                let stage = document.getElementById('stageSelect').value;
+                let classSelect = document.getElementById('waClassSelect');
+                classSelect.innerHTML = '<option value="">-- اختر الصف --</option>';
+                document.getElementById('studentsCheckboxContainer').innerHTML = '<p style="color:#777; font-size:13px; margin:0;">الرجاء اختيار الصف لعرض الطلاب...</p>';
+                document.getElementById('selectAllStudents').checked = false;
                 
+                if(!stage) return;
+
+                let filteredClasses = allClasses.filter(cls => {
+                    let upperCls = cls.toUpperCase();
+                    if(stage === 'BT') return upperCls.includes('BT') || upperCls.includes('بكالوريا');
+                    if(stage === 'TS') return upperCls.includes('TS') || upperCls.includes('امتياز');
+                    if(stage === 'BP') return upperCls.includes('BP') || upperCls.includes('تكميلية');
+                    if(stage === 'LT') return upperCls.includes('LT') || upperCls.includes('إجازة');
+                    return true;
+                });
+
+                if(filteredClasses.length === 0) filteredClasses = allClasses;
+
+                let opts = '<option value="">-- اختر الصف --</option>';
+                filteredClasses.forEach(cls => {
+                    opts += `<option value="${cls}">${cls}</option>`;
+                });
+                classSelect.innerHTML = opts;
+            }
+
+            function loadStudentsCheckboxes() {
+                let cls = document.getElementById('waClassSelect').value;
+                let container = document.getElementById('studentsCheckboxContainer');
+                container.innerHTML = '<p style="color:#777; font-size:13px; margin:0;">جاري تحميل الطلاب...</p>';
+                document.getElementById('selectAllStudents').checked = false;
+
+                if(!cls) {
+                    container.innerHTML = '<p style="color:#777; font-size:13px; margin:0;">الرجاء اختيار الصف لعرض الطلاب...</p>';
+                    return;
+                }
+
                 fetch('/api/get_students/' + encodeURIComponent(cls)).then(res => res.json()).then(data => {
-                    currentClassStudents = data.details;
-                    let opts = '<option value="">-- اختر الطالب --</option>';
-                    data.details.forEach(st => {
-                        opts += `<option value="${st.phone}" data-name="${st.name}">${st.name} ${st.phone ? '('+st.phone+')' : '(بدون رقم)'}</option>`;
+                    if(!data.details || data.details.length === 0) {
+                        container.innerHTML = '<p style="color:#d32f2f; font-size:13px; margin:0;">لا توجد أسماء طلاب مسجلة في هذا الصف.</p>';
+                        return;
+                    }
+                    let html = '';
+                    data.details.forEach((st) => {
+                        let phoneDisplay = st.phone ? st.phone : 'بدون رقم';
+                        let phoneClass = st.phone ? 'color:#2e7d32; font-weight:bold;' : 'color:#c62828;';
+                        html += `
+                            <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid #f0f0f0;">
+                                <label style="display:flex; align-items:center; gap:8px; cursor:pointer; flex:1; font-size:13.5px;">
+                                    <input type="checkbox" class="student-checkbox" value="${st.phone || ''}" data-name="${st.name}">
+                                    <span><b>${st.name}</b></span>
+                                </label>
+                                <span style="font-size:12.5px; ${phoneClass}">${phoneDisplay}</span>
+                            </div>
+                        `;
                     });
-                    stdSelect.innerHTML = opts;
+                    container.innerHTML = html;
                 });
             }
 
-            function toggleWaMode() {
-                let mode = document.querySelector('input[name="waTargetMode"]:checked').value;
-                let singleBox = document.getElementById('singleStudentBox');
-                let classBox = document.getElementById('classBroadcastBox');
-                if(mode === 'student') {
-                    singleBox.style.display = 'block';
-                    classBox.style.display = 'none';
-                } else {
-                    singleBox.style.display = 'none';
-                    classBox.style.display = 'block';
-                }
-            }
-
-            function fillStudentPhone() {
-                let stdSelect = document.getElementById('waStudentSelect');
-                let phone = stdSelect.value;
-                if(phone) { document.getElementById('waPhoneInput').value = phone; }
+            function toggleSelectAllStudents() {
+                let selectAll = document.getElementById('selectAllStudents').checked;
+                document.querySelectorAll('.student-checkbox').forEach(chk => {
+                    chk.checked = selectAll;
+                });
             }
 
             function fillTeacherPhone() {
@@ -874,55 +904,43 @@ def admin_dashboard():
             }
 
             function setWaTemplate(type) {
-                let mode = document.querySelector('input[name="waTargetMode"]:checked').value;
                 let msgBox = document.getElementById('waMessageInput');
-
-                if(mode === 'student') {
-                    let stdSelect = document.getElementById('waStudentSelect');
-                    let selectedOpt = stdSelect.options[stdSelect.selectedIndex];
-                    let studentName = selectedOpt ? selectedOpt.getAttribute('data-name') || 'الطالب' : 'الطالب';
-                    if(type === 'absence') {
-                        msgBox.value = `حضرة ولي أمر الطالب/ة ${studentName} المحترم، نحيطكم علماً بتسجيل غياب عن الحصص الدراسية اليوم في معهد الهرمل الفني.`;
-                    } else if(type === 'exam') {
-                        msgBox.value = `جانب الطالب/ة ${studentName} المحترم، نذكركم بموعد الامتحان القادم في معهد الهرمل الفني. نتمنى لكم التوفيق والنجاح.`;
-                    } else if(type === 'general') {
-                        msgBox.value = `جانب الطالب/ة ${studentName}، تحية طيبة من إدارة معهد الهرمل الفني الرسمية.`;
-                    }
-                } else {
-                    let clsName = document.getElementById('waClassSelect').value || 'الصف';
-                    if(type === 'absence') {
-                        msgBox.value = `تنبيه لطلاب صف ${clsName} في معهد الهرمل الفني: يرجى الانتباه للدوام المدرسي.`;
-                    } else if(type === 'exam') {
-                        msgBox.value = `تنويه هام لطلاب صف ${clsName}: نذكركم بمواعيد الامتحانات القادمة. نتمنى للجميع النجاح.`;
-                    } else if(type === 'general') {
-                        msgBox.value = `تعميم إداري هام صادر عن إدارة معهد الهرمل الفني لطلاب صف ${clsName}: ...`;
-                    }
+                let clsName = document.getElementById('waClassSelect').value || 'الصف';
+                if(type === 'absence') {
+                    msgBox.value = `حضرة ولي أمر الطالب/ة المحترم، نحيطكم علماً بتسجيل غياب عن الحصص الدراسية اليوم في معهد الهرمل الفني.`;
+                } else if(type === 'exam') {
+                    msgBox.value = `جانب الطالب/ة المحترم، نذكركم بموعد الامتحان القادم في معهد الهرمل الفني. نتمنى لكم التوفيق والنجاح.`;
+                } else if(type === 'general') {
+                    msgBox.value = `تعميم إداري صادر عن إدارة معهد الهرمل الفني لطلاب صف ${clsName}: ...`;
                 }
             }
 
             function sendWhatsAppMessage() {
-                let mode = document.querySelector('input[name="waTargetMode"]:checked').value;
-                let msg = encodeURIComponent(document.getElementById('waMessageInput').value);
+                let msg = document.getElementById('waMessageInput').value.trim();
+                if(!msg) { alert("يرجى كتابة نص الرسالة أولاً"); return; }
 
-                if(mode === 'student') {
-                    let phone = document.getElementById('waPhoneInput').value.replace(/\D/g, '');
-                    if(!phone) { alert("يرجى إدخال أو اختيار رقم الهاتف أولاً"); return; }
-                    if(!phone.startsWith('961') && phone.length <= 8) { phone = '961' + phone; }
-                    window.open(`https://wa.me/${phone}?text=${msg}`, '_blank');
-                } else {
-                    if(currentClassStudents.length === 0) { alert("لا توجد أسماء طلاب في هذا الصف أو لم يتم تحميلهم"); return; }
-                    let validStudents = currentClassStudents.filter(st => st.phone && st.phone.trim() !== '');
-                    if(validStudents.length === 0) { alert("لا توجد أرقام هواتف مسجلة لطلاب هذا الصف"); return; }
-                    
-                    if(confirm(`سيتم فتح محادثات واتساب تباعاً لـ (${validStudents.length}) طالب لديهم أرقام هواتف. هل تريد المتابعة؟`)) {
-                        validStudents.forEach((st, idx) => {
-                            let phone = st.phone.replace(/\D/g, '');
-                            if(!phone.startsWith('961') && phone.length <= 8) { phone = '961' + phone; }
-                            setTimeout(() => {
-                                window.open(`https://wa.me/${phone}?text=${msg}`, '_blank');
-                            }, idx * 600);
-                        });
+                let checkedBoxes = document.querySelectorAll('.student-checkbox:checked');
+                if(checkedBoxes.length === 0) { alert("يرجى تحديد طالب واحد على الأقل أو تحديد الكل لإرسال الرسالة"); return; }
+
+                let validRecipients = [];
+                checkedBoxes.forEach(chk => {
+                    let phone = chk.value.replace(/\D/g, '');
+                    let name = chk.getAttribute('data-name');
+                    if(phone) {
+                        if(!phone.startsWith('961') && phone.length <= 8) { phone = '961' + phone; }
+                        validRecipients.push({name, phone});
                     }
+                });
+
+                if(validRecipients.length === 0) { alert("الطلاب المحددون ليس لديهم أرقام هواتف مسجلة صالحة"); return; }
+
+                let encodedMsg = encodeURIComponent(msg);
+                if(confirm(`سيتم فتح محادثات واتساب تباعاً لـ (${validRecipients.length}) طالب محدد. هل تريد المتابعة؟`)) {
+                    validRecipients.forEach((rec, idx) => {
+                        setTimeout(() => {
+                            window.open(`https://wa.me/${rec.phone}?text=${encodedMsg}`, '_blank');
+                        }, idx * 600);
+                    });
                 }
             }
 
