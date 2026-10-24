@@ -117,8 +117,15 @@ def normalize_name(name):
     n = re.sub(r'[أإآ]', 'ا', n)
     n = re.sub(r'ى', 'ي', n)
     n = re.sub(r'ة', 'ه', n)
-    n = re.sub(r'\s+', ' ', n)
+    n = re.sub(r'[\s_\-]+', ' ', n)
     return n.lower()
+
+def smart_match(query, target):
+    """دالة بحث ذكية لتطابق النصوص بدون إملاء حساس"""
+    if not query or not target: return False
+    q = normalize_name(query)
+    t = normalize_name(target)
+    return q in t or t in q
 
 def calculate_distance(lat1, lon1, lat2, lon2):
     R = 6371000
@@ -221,6 +228,29 @@ def load_from_disk():
     return False
 
 load_from_disk()
+
+def get_teacher_assignments(teacher_name):
+    """استخراج المواد والصفوف الموكلة للأستاذ ببحث ذكي"""
+    norm_t = normalize_name(teacher_name)
+    assignments = []
+
+    # 1. من جدول الأستاذ والمواد
+    parsed_sub = directorate_excel_tables.get('teachers_and_subjects', {}).get('parsed_schedule', {})
+    for t_key, items in parsed_sub.items():
+        if smart_match(norm_t, t_key):
+            for it in items:
+                assignments.append({'class': it['class'], 'subject': it['subject']})
+
+    # 2. من البرنامج الأسبوعي
+    parsed_sched = directorate_excel_tables.get('weekly_schedule', {}).get('parsed_schedule', {})
+    for t_key, items in parsed_sched.items():
+        if smart_match(norm_t, t_key):
+            for it in items:
+                item_dict = {'class': it['class'], 'subject': it['subject']}
+                if item_dict not in assignments:
+                    assignments.append(item_dict)
+
+    return assignments
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -427,8 +457,15 @@ login_template = '''
 
 @app.route('/api/get_students/<path:class_name>')
 def get_students(class_name):
-    students = classes_students.get(class_name, [])
-    return jsonify({'students': students})
+    # بحث ذكي لمعرفة صف الطلاب المستهدف
+    matched_students = []
+    for c_key, sts in classes_students.items():
+        if smart_match(class_name, c_key):
+            matched_students = sts
+            break
+    if not matched_students:
+        matched_students = classes_students.get(class_name, [])
+    return jsonify({'students': matched_students})
 
 @app.route('/admin/download_backup')
 def download_backup():
@@ -532,7 +569,7 @@ def admin_dashboard():
                             if t_raw_name and len(t_raw_name.split()) >= 2:
                                 user_id = None
                                 for u, t_info in teachers_db.items():
-                                    if normalize_name(t_info['name']) == t_norm_key:
+                                    if smart_match(t_info['name'], t_raw_name):
                                         user_id = u
                                         break
                                 if not user_id:
@@ -647,7 +684,7 @@ def admin_dashboard():
 
                 if name and len(name.split()) >= 2:
                     user_id = f"teacher_{len(teachers_db) + 1}"
-                    if not any(normalize_name(t['name']) == normalize_name(name) for t in teachers_db.values()):
+                    if not any(smart_match(t['name'], name) for t in teachers_db.values()):
                         teachers_db[user_id] = {
                             "name": name,
                             "auto_id": auto_id if auto_id else f"100{len(teachers_db)+1}",
@@ -694,7 +731,7 @@ def admin_dashboard():
                 msg = "تم تغيير كلمة المرور الإدارية بنجاح!"
 
     attendance_rows = "".join([f"<tr><td><b>{k}</b></td><td style='color:#c62828;'>متغيبون: {v.get('absent', [])}</td></tr>" for k, v in attendance_db.items()])
-    grades_rows = "".join([f"<tr><td><b>{k}</b></td><td><b style='color:#0d47a1;'>{v} / 20</b></td></tr>" for k, v in grades_db.items()])
+    grades_rows = "".join([f"<tr><td><b>{k}</b></td><td><b style='color:#0d47a1;'>{v}</b></td></tr>" for k, v in grades_db.items()])
     
     executed_hours_table_html = ""
     monthly_data_map = directorate_excel_tables.get('executed_hours', {}).get('monthly_hours', {})
@@ -704,7 +741,7 @@ def admin_dashboard():
         for norm_k, m_dict in monthly_data_map.items():
             disp_name = norm_k
             for t_info in teachers_db.values():
-                if normalize_name(t_info['name']) == norm_k:
+                if smart_match(t_info['name'], norm_k):
                     disp_name = t_info['name']
                     break
             m_tds = "".join([f"<td>{m_dict.get(m, 0):.0f}</td>" for m in MONTH_COLUMNS])
@@ -722,7 +759,7 @@ def admin_dashboard():
         for norm_k, m_dict in monthly_trans_map.items():
             disp_name = norm_k
             for t_info in teachers_db.values():
-                if normalize_name(t_info['name']) == norm_k:
+                if smart_match(t_info['name'], norm_k):
                     disp_name = t_info['name']
                     break
             t_tds = "".join([f"<td>{m_dict.get(m, 0):.0f} يوم</td>" for m in MONTH_COLUMNS])
@@ -997,6 +1034,9 @@ def teacher_dashboard():
     norm_t_name = normalize_name(t_name)
     msg = ''
 
+    # استخراج المواد والصفوف الخاصة بالأستاذ بالبحث الذكي
+    teacher_assignments = get_teacher_assignments(t_name)
+
     if request.method == 'POST':
         action = request.form.get('action')
         
@@ -1008,19 +1048,36 @@ def teacher_dashboard():
                 msg = "تم تغيير كلمة المرور الخاصة بك بنجاح!"
 
         elif action == 'submit_class_grades':
-            class_name = request.form.get('class_name')
-            subject = user_data.get('subject', 'عام')
-            students = classes_students.get(class_name, [])
-            for st in students:
-                val = request.form.get(f"grade_{st}")
-                if val:
-                    grades_db[f"{st} - {class_name} ({subject})"] = val
-            save_to_disk()
-            msg = "تم حفظ ورصد علامات الطلاب بنجاح!"
+            assignment_pair = request.form.get('assignment_pair')
+            if assignment_pair and '|' in assignment_pair:
+                class_name, subject = assignment_pair.split('|')
+                
+                # البحث الذكي عن الطلاب التابعين لهذا الصف
+                students = []
+                for c_key, sts in classes_students.items():
+                    if smart_match(class_name, c_key):
+                        students = sts
+                        break
+                if not students:
+                    students = classes_students.get(class_name, [])
+
+                for st in students:
+                    val = request.form.get(f"grade_{st}")
+                    if val is not None and val != "":
+                        grades_db[f"{st} - {class_name} ({subject})"] = val
+                save_to_disk()
+                msg = f"تم حفظ ورصد علامات مادة ({subject}) لصف ({class_name}) بنجاح!"
 
         elif action == 'submit_class_attendance':
             class_name = request.form.get('class_name')
-            students = classes_students.get(class_name, [])
+            students = []
+            for c_key, sts in classes_students.items():
+                if smart_match(class_name, c_key):
+                    students = sts
+                    break
+            if not students:
+                students = classes_students.get(class_name, [])
+
             present_sts = request.form.getlist('attendance_check')
             absent_sts = [s for s in students if s not in present_sts]
             date_key = datetime.now().strftime('%Y-%m-%d')
@@ -1034,8 +1091,15 @@ def teacher_dashboard():
             save_to_disk()
             msg = "تم إرسال رسالتك للإدارة بنجاح!"
 
-    my_classes = teacher_classes_map.get(username, list(classes_students.keys()))
-    class_opts = "".join([f'<option value="{c}">{c}</option>' for c in my_classes])
+    # خيارات خيارات الصف والمادة الموكلة للأستاذ حصراً
+    if teacher_assignments:
+        grade_assignment_opts = "".join([f'<option value="{asg["class"]}|{asg["subject"]}">صف: {asg["class"]} - مادة: {asg["subject"]}</option>' for asg in teacher_assignments])
+    else:
+        # خيار احتياطي في حال عدم إدراج الجدول بعد
+        my_classes = teacher_classes_map.get(username, list(classes_students.keys()))
+        grade_assignment_opts = "".join([f'<option value="{c}|{user_data.get("subject", "عام")}">صف: {c} - مادة: {user_data.get("subject", "عام")}</option>' for c in my_classes])
+
+    att_class_opts = "".join([f'<option value="{c}">{c}</option>' for c in classes_students.keys()])
     
     raw_notifs = user_data.get('notifications', [])
     notifs = ""
@@ -1049,8 +1113,11 @@ def teacher_dashboard():
 
     all_monthly_hours = directorate_excel_tables.get('executed_hours', {}).get('monthly_hours', {})
     monthly_hrs = user_data.get('monthly_hours', {})
-    if not monthly_hrs and norm_t_name in all_monthly_hours:
-        monthly_hrs = all_monthly_hours[norm_t_name]
+    if not monthly_hrs:
+        for k_name, m_val in all_monthly_hours.items():
+            if smart_match(k_name, norm_t_name):
+                monthly_hrs = m_val
+                break
 
     contract_hrs = float(user_data.get('contract_hours', 300))
     executed_hrs = sum([float(v) for v in monthly_hrs.values()]) if monthly_hrs else 0
@@ -1058,7 +1125,11 @@ def teacher_dashboard():
     rem_color = "#2e7d32" if remaining_hrs >= 0 else "#c62828"
 
     all_transport = directorate_excel_tables.get('transport_days', {}).get('monthly_transport', {})
-    my_transport_days = sum(all_transport.get(norm_t_name, {}).values()) if norm_t_name in all_transport else 0
+    my_transport_days = 0
+    for k_name, t_val in all_transport.items():
+        if smart_match(k_name, norm_t_name):
+            my_transport_days = sum(t_val.values())
+            break
     
     hrs_html = ""
     if monthly_hrs:
@@ -1099,7 +1170,12 @@ def teacher_dashboard():
         """
 
     parsed_schedule = directorate_excel_tables.get('weekly_schedule', {}).get('parsed_schedule', {})
-    teacher_schedule_items = parsed_schedule.get(norm_t_name, [])
+    teacher_schedule_items = []
+    for k_name, items in parsed_schedule.items():
+        if smart_match(k_name, norm_t_name):
+            teacher_schedule_items = items
+            break
+
     schedule_html = ""
     if teacher_schedule_items:
         schedule_rows = "".join([f"<tr><td><b>{item['day']}</b></td><td>{item['period']}</td><td>{item['class']}</td><td><b style='color:#0d47a1;'>{item['subject']}</b></td></tr>" for item in teacher_schedule_items])
@@ -1117,7 +1193,7 @@ def teacher_dashboard():
         </div>
         """
 
-    my_sessions = [s for s in field_sessions if normalize_name(s['primary_teacher']) == norm_t_name or normalize_name(s.get('secondary_teacher', '')) == norm_t_name]
+    my_sessions = [s for s in field_sessions if smart_match(s['primary_teacher'], norm_t_name) or smart_match(s.get('secondary_teacher', ''), norm_t_name)]
     field_html = ""
     for s in my_sessions:
         if s['status'] == 'قيد التدريب':
@@ -1177,24 +1253,27 @@ def teacher_dashboard():
             </div>
 
             <div class="card">
-                <h4 style="color:#0d47a1; margin-top:0;">📋 توثيق حضور وغياب الطلاب اليومي:</h4>
+                <h4 style="color:#0d47a1; margin-top:0;">📝 إدخال ورصد علامات الطلاب للمواد الموكلة إليك:</h4>
                 <form method="POST">
-                    <input type="hidden" name="action" value="submit_class_attendance">
-                    <label>اختر الصف:</label>
-                    <select name="class_name" id="attClass" onchange="loadStudentsForAtt()" required><option value="">-- اختر الصف --</option>{{ class_opts | safe }}</select>
-                    <div id="attContainer" style="margin-top:10px;"></div>
-                    <button type="submit" id="attBtn" style="display:none; background:#2e7d32; margin-top:10px;">حفظ الحضور والغياب</button>
+                    <input type="hidden" name="action" value="submit_class_grades">
+                    <label>اختر الصف والمادة:</label>
+                    <select name="assignment_pair" id="gradePair" onchange="loadStudentsForGrades()" required>
+                        <option value="">-- اختر الصف والمادة الموكلة إليك --</option>
+                        {{ grade_assignment_opts | safe }}
+                    </select>
+                    <div id="gradeContainer" style="margin-top:10px;"></div>
+                    <button type="submit" id="gradeBtn" style="display:none; margin-top:10px;">حفظ ورصد العلامات</button>
                 </form>
             </div>
 
             <div class="card">
-                <h4 style="color:#0d47a1; margin-top:0;">📝 إدخال ورصد علامات الطلاب (من 20):</h4>
+                <h4 style="color:#0d47a1; margin-top:0;">📋 توثيق حضور وغياب الطلاب اليومي:</h4>
                 <form method="POST">
-                    <input type="hidden" name="action" value="submit_class_grades">
+                    <input type="hidden" name="action" value="submit_class_attendance">
                     <label>اختر الصف:</label>
-                    <select name="class_name" id="gradeClass" onchange="loadStudentsForGrades()" required><option value="">-- اختر الصف --</option>{{ class_opts | safe }}</select>
-                    <div id="gradeContainer" style="margin-top:10px;"></div>
-                    <button type="submit" id="gradeBtn" style="display:none; margin-top:10px;">حفظ ورصد العلامات</button>
+                    <select name="class_name" id="attClass" onchange="loadStudentsForAtt()" required><option value="">-- اختر الصف --</option>{{ att_class_opts | safe }}</select>
+                    <div id="attContainer" style="margin-top:10px;"></div>
+                    <button type="submit" id="attBtn" style="display:none; background:#2e7d32; margin-top:10px;">حفظ الحضور والغياب</button>
                 </form>
             </div>
 
@@ -1226,15 +1305,22 @@ def teacher_dashboard():
             }
 
             function loadStudentsForGrades() {
-                let cls = document.getElementById('gradeClass').value;
+                let val = document.getElementById('gradePair').value;
                 let cont = document.getElementById('gradeContainer');
                 let btn = document.getElementById('gradeBtn');
                 cont.innerHTML = '';
-                if(!cls) { btn.style.display='none'; return; }
-                fetch('/api/get_students/' + encodeURIComponent(cls)).then(res => res.json()).then(data => {
-                    let html = '';
+                if(!val || !val.includes('|')) { btn.style.display='none'; return; }
+                
+                let className = val.split('|')[0];
+
+                fetch('/api/get_students/' + encodeURIComponent(className)).then(res => res.json()).then(data => {
+                    let html = '<p style="font-size:13px; color:#555; margin-bottom:8px;">حدد العلامة للطالب (من 0 إلى 20 أو غائب):</p>';
                     data.students.forEach(st => {
-                        html += `<div class="student-row"><span style="flex:1; font-weight:bold;">${st}</span><input type="number" step="0.5" min="0" max="20" name="grade_${st}" placeholder="العلامة /20" style="width:110px; margin-top:0;" required></div>`;
+                        let selectOpts = '<option value="">-- حدد العلامة --</option><option value="غائب" style="color:#c62828; font-weight:bold;">❌ غائب</option>';
+                        for(let i=0; i<=20; i+=0.5) {
+                            selectOpts += `<option value="${i}">${i} / 20</option>`;
+                        }
+                        html += `<div class="student-row"><span style="flex:1; font-weight:bold;">${st}</span><select name="grade_${st}" style="width:140px; margin-top:0;" required>${selectOpts}</select></div>`;
                     });
                     cont.innerHTML = html;
                     btn.style.display = 'block';
@@ -1258,7 +1344,7 @@ def teacher_dashboard():
     </body>
     </html>
     """
-    return render_template_string(teacher_template, t_name=t_name, msg=msg, class_opts=class_opts, notifs=notifs, hrs_html=hrs_html, schedule_html=schedule_html, field_html=field_html)
+    return render_template_string(teacher_template, t_name=t_name, msg=msg, grade_assignment_opts=grade_assignment_opts, att_class_opts=att_class_opts, notifs=notifs, hrs_html=hrs_html, schedule_html=schedule_html, field_html=field_html)
 
 @app.route('/teacher/submit_field_attendance', methods=['POST'])
 def submit_field_attendance():
