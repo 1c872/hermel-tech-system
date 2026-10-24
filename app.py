@@ -27,7 +27,10 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 DB_FILE = os.path.join(BASE_DIR, 'database.json')
 BACKUP_FILE = os.path.join(BASE_DIR, 'database_backup.json')
 
+# تنظيف رابط قاعدة البيانات من أي مسافات زائدة لمنع خطأ channel_binding
 DATABASE_URL = os.environ.get('DATABASE_URL')
+if DATABASE_URL:
+    DATABASE_URL = DATABASE_URL.strip()
 
 def get_db_connection():
     if not DATABASE_URL:
@@ -955,7 +958,8 @@ def admin_dashboard():
     </body>
     </html>
     '''
-    return render_template_string(admin_template, current_academic_year=current_academic_year, msg=msg)
+    # تمرير متغير classes_students لحل مشكلة الـ UndefinedError في القالب
+    return render_template_string(admin_template, current_academic_year=current_academic_year, msg=msg, classes_students=classes_students)
 
 @app.route('/teacher', methods=['GET', 'POST'])
 def teacher_dashboard():
