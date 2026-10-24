@@ -57,22 +57,12 @@ def init_db_table():
 
 init_db_table()
 
-TRAINING_LOCATIONS = {
-    "مستشفى الهرمل الحكومي": {"lat": 34.381283, "lng": 36.424456, "radius_meters": 300},
-    "مستشفى البتول": {"lat": 34.381283, "lng": 36.424456, "radius_meters": 300},
-    "مستشفى دار الكرامة": {"lat": 34.403492, "lng": 36.396789, "radius_meters": 250},
-    "مستشفى العاصي": {"lat": 34.398330, "lng": 36.406490, "radius_meters": 250},
-    "مدرسة سانرايز": {"lat": 34.403492, "lng": 36.396789, "radius_meters": 200},
-    "ثانوية الرشاد": {"lat": 34.403826, "lng": 36.391736, "radius_meters": 200},
-    "مدرسة الإمام علي": {"lat": 34.395518, "lng": 36.386411, "radius_meters": 200}
-}
-
 teachers_db = {}
 grades_db = {}            
 attendance_db = {}        
 teacher_classes_map = {}  
 classes_students = {}
-students_contact_info = {} # دليل أرقام هواتف الطلاب للواتساب
+students_contact_info = {}
 admin_replies = []
 admin_credentials = {'username': 'admin', 'password': '123456'}
 
@@ -81,8 +71,6 @@ current_academic_year = "2025-2026"
 
 field_sessions = []
 teacher_absences_log = []
-
-MONTH_COLUMNS = ["10", "11", "12", "01", "02", "03", "04", "05", "06", "07", "08"]
 
 directorate_excel_tables = {
     "students_registered": {"title": "الطلاب المسجلون", "columns": [], "data": []},
@@ -119,24 +107,6 @@ def normalize_name(name):
 def smart_match(query, target):
     if not query or not target: return False
     return normalize_name(query) in normalize_name(target) or normalize_name(target) in normalize_name(query)
-
-def format_phone_whatsapp(phone_str):
-    """تنظيف رقم الهاتف وتنسيقه للرمز الدولي اللبناني +961"""
-    if not phone_str: return ""
-    cleaned = re.sub(r'\D', '', str(phone_str))
-    if cleaned.startswith('00961'): cleaned = cleaned[5:]
-    elif cleaned.startswith('961'): cleaned = cleaned[3:]
-    if cleaned.startswith('0'): cleaned = cleaned[1:]
-    if len(cleaned) == 7 or len(cleaned) == 8:
-        return f"961{cleaned}"
-    return cleaned
-
-def calculate_distance(lat1, lon1, lat2, lon2):
-    R = 6371000
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    delta_phi, delta_lambda = math.radians(lat2 - lat1), math.radians(lon2 - lon1)
-    a = math.sin(delta_phi / 2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2)**2
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 def save_to_disk():
     try:
@@ -229,19 +199,16 @@ load_from_disk()
 def get_teacher_assignments(teacher_name):
     norm_t = normalize_name(teacher_name)
     assignments = []
-
     parsed_sub = directorate_excel_tables.get('teachers_and_subjects', {}).get('parsed_schedule', {})
     for t_key, items in parsed_sub.items():
         if smart_match(norm_t, t_key):
             for it in items: assignments.append({'class': it['class'], 'subject': it['subject']})
-
     parsed_sched = directorate_excel_tables.get('weekly_schedule', {}).get('parsed_schedule', {})
     for t_key, items in parsed_sched.items():
         if smart_match(norm_t, t_key):
             for it in items:
                 item_dict = {'class': it['class'], 'subject': it['subject']}
                 if item_dict not in assignments: assignments.append(item_dict)
-
     return assignments
 
 def parse_teachers_and_subjects_smart(df):
@@ -253,7 +220,6 @@ def parse_teachers_and_subjects_smart(df):
         c_name = str(row.iloc[1]).strip() if len(row) > 1 and pd.notna(row.iloc[1]) else ""
         s_name = str(row.iloc[2]).strip() if len(row) > 2 and pd.notna(row.iloc[2]) else ""
         s_type = str(row.iloc[3]).strip() if len(row) > 3 and pd.notna(row.iloc[3]) else "نظري"
-        
         if t_name and s_name and c_name:
             norm_t = normalize_name(t_name)
             if norm_t not in parsed_teachers: parsed_teachers[norm_t] = []
@@ -302,8 +268,8 @@ HEADER_VTE_HTML = '''
     <div class="dropdown">
         <button class="dropbtn">التواصل الفوري (WhatsApp) 💬 ▾</button>
         <div class="dropdown-content">
-            <a href="javascript:void(0)" onclick="showSection('whatsAppCenterSec')">💬 مراسلة طالب / ولي أمر عبر الواتساب</a>
-            <a href="javascript:void(0)" onclick="showSection('whatsAppTeacherSec')">📲 مراسلة أستاذ مباشرة</a>
+            <a href="javascript:void(0)" onclick="showSection('whatsAppCenterSec')">💬 مراسلة طالب / صف كامل عبر الواتساب</a>
+            <a href="javascript:void(0)" onclick="showSection('whatsAppTeacherSec')">📲 مراسلة أستاذ مباشرة وإرسال الحساب</a>
         </div>
     </div>
 
@@ -426,9 +392,9 @@ def get_students(class_name):
         if smart_match(class_name, c_key):
             matched_students = sts
             break
-    if not matched_students: matched_students = classes_students.get(class_name, [])
+    if not matched_students: 
+        matched_students = classes_students.get(class_name, [])
     
-    # جلب معلومات هواتف الطلاب إذا توفرت
     student_details = []
     for st in matched_students:
         phone = students_contact_info.get(st, '')
@@ -490,7 +456,7 @@ def admin_dashboard():
                         for r in rows_data:
                             t_raw_name = r.get('الاسم الثلاثي', r.get('اسم الاستاذ', r.get('الاسم', ''))).strip()
                             auto_id = clean_auto_id(r.get('الرقم الالي', r.get('الرقم الآلي', r.get('رقم الاستاذ', ''))))
-                            phone_val = r.get('الهاتف', r.get('رقم الهاتف', r.get('خلوي', '')))
+                            phone_val = r.get('الهاتف', r.get('رقم الهاتف', r.get('خلوي', r.get('هاتف', ''))))
                             allowed_hrs = r.get('عدد الساعات المسموح بها', r.get('Maxhoures', '300'))
                             
                             if t_raw_name and len(t_raw_name.split()) >= 2:
@@ -503,7 +469,7 @@ def admin_dashboard():
                                 teachers_db[user_id] = {
                                     "name": t_raw_name,
                                     "auto_id": auto_id,
-                                    "phone": phone_val,
+                                    "phone": phone_val if phone_val else teachers_db.get(user_id, {}).get('phone', ''),
                                     "password": auto_id if auto_id else "123456",
                                     "subject": r.get('المادة', 'عام'),
                                     "mobile_device": teachers_db.get(user_id, {}).get('mobile_device', ''),
@@ -520,14 +486,30 @@ def admin_dashboard():
                     if file_key == 'students_registered':
                         new_classes = {}
                         for r in rows_data:
-                            c_name = r.get('الصف', r.get('Class', r.get('التخصص', 'غير مصنف')))
-                            s_name = r.get('اسم الطالب الكامل', r.get('اسم الطالب', r.get('الاسم الثلاثي', r.get('الاسم', ''))))
-                            s_phone = r.get('الهاتف', r.get('رقم الهاتف', r.get('خلوي', '')))
+                            c_name = ""
+                            s_name = ""
+                            s_phone = ""
+                            for k, v in r.items():
+                                k_clean = str(k).strip()
+                                if any(sub in k_clean for sub in ['الصف', 'Class', 'التخصص', 'الاختصاص', 'المستوى']):
+                                    if v and str(v).strip() != 'nan': c_name = str(v).strip()
+                                if any(sub in k_clean for sub in ['اسم الطالب', 'الاسم', 'الطالب', 'name']):
+                                    if v and str(v).strip() != 'nan' and not s_name: s_name = str(v).strip()
+                                if any(sub in k_clean for sub in ['هاتف', 'خلوي', 'رقم', 'phone', 'Mobile']):
+                                    if v and str(v).strip() != 'nan' and not s_phone: s_phone = str(v).strip()
+                            
+                            if not c_name and len(r) > 1: c_name = str(list(r.values())[1]).strip()
+                            if not s_name and len(r) > 0: s_name = str(list(r.values())[0]).strip()
+
                             if c_name and s_name and str(c_name) != 'nan' and str(s_name) != 'nan':
                                 if c_name not in new_classes: new_classes[c_name] = []
                                 if s_name not in new_classes[c_name]: new_classes[c_name].append(s_name)
                                 if s_phone: students_contact_info[s_name] = s_phone
-                        if new_classes: classes_students.update(new_classes)
+                        if new_classes: 
+                            for cls_key, sts in new_classes.items():
+                                if cls_key not in classes_students: classes_students[cls_key] = []
+                                for st in sts:
+                                    if st not in classes_students[cls_key]: classes_students[cls_key].append(st)
 
                     directorate_excel_tables[file_key] = {
                         "title": directorate_excel_tables[file_key]["title"],
@@ -545,7 +527,7 @@ def admin_dashboard():
             for card in t_cards:
                 name = card.get('الاسم الثلاثي', card.get('الاسم', '')).strip()
                 auto_id = clean_auto_id(card.get('الرقم الالي', card.get('الرقم الآلي', card.get('رقم الاستاذ', ''))))
-                phone = card.get('الهاتف', card.get('خلوي', ''))
+                phone = card.get('الهاتف', card.get('خلوي', card.get('هاتف', '')))
                 allowed_hrs = card.get('عدد الساعات المسموح بها', card.get('Maxhoures', 300))
                 try: c_hrs_val = int(float(allowed_hrs))
                 except: c_hrs_val = 300
@@ -577,19 +559,30 @@ def admin_dashboard():
                 save_to_disk()
                 msg = "تم فك ربط جهاز الأستاذ بنجاح!"
 
-        elif action == 'send_notification':
-            target_user = request.form.get('target_user')
-            notif = request.form.get('notification_text')
-            if target_user == 'all':
-                for u, t in teachers_db.items(): t['notifications'].append(notif)
-            elif target_user in teachers_db:
-                teachers_db[target_user]['notifications'].append(notif)
-            save_to_disk()
-            msg = "تم إرسال التعميم بنجاح!"
-
     sorted_teachers_list = sorted(teachers_db.items(), key=lambda x: x[1]['name'])
     
-    # خيارات المراسلة عبر الواتساب للأساتذة والطلاب
+    teachers_rows = ""
+    for u, t in sorted_teachers_list:
+        auto_id_val = clean_auto_id(t.get('auto_id', 'غير محدد'))
+        phone_val = t.get('phone', 'بدون رقم')
+        pass_val = clean_auto_id(t.get('password', ''))
+        
+        clean_phone = re.sub(r'\D', '', str(phone_val))
+        if clean_phone.startswith('0'): clean_phone = clean_phone[1:]
+        if len(clean_phone) in [7, 8]: clean_phone = '961' + clean_phone
+        
+        teachers_rows += f"""
+        <tr>
+            <td><b>{t['name']}</b><br><small>الرقم الآلي: {auto_id_val}</small></td>
+            <td><code style='color:#0d47a1; font-weight:bold; font-size:14px;'>{u}</code></td>
+            <td><b style='color:#d32f2f; font-size:14px;'>{pass_val}</b></td>
+            <td><b>{phone_val}</b></td>
+            <td>
+                {f'<a href="https://wa.me/{clean_phone}?text=' + f'مرحباً الاستاذ {t["name"]}، إليك بيانات حسابك في نظام معهد الهرمل الفني:\nاسم المستخدم: {u}\nكلمة المرور: {pass_val}" target="_blank" style="background:#25D366; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-weight:bold; font-size:12px; display:inline-block;">📲 إرسال الحساب واتساب</a>' if clean_phone else '<span style="color:#777; font-size:12px;">لا يوجد رقم</span>'}
+            </td>
+        </tr>
+        """
+
     teachers_wa_opts = "".join([f"<option value='{t.get('phone', '')}'>{t['name']} - {t.get('phone', 'بدون رقم')}</option>" for u, t in sorted_teachers_list])
     classes_wa_opts = "".join([f"<option value='{c}'>{c}</option>" for c in classes_students.keys()])
     year_select_opts = "".join([f"<option value='{y}' {'selected' if y==current_academic_year else ''}>{y}</option>" for y in academic_years_db])
@@ -619,9 +612,9 @@ def admin_dashboard():
         <div class="container">
             {% if msg %}<div style="background:#e8f5e9; color:#2e7d32; padding:12px; border-radius:6px; font-weight:bold; margin-bottom:15px;">{{ msg }}</div>{% endif %}
 
-            <!-- مركز التواصل الفوري عبر الواتساب للطالب -->
+            <!-- مركز التواصل الفوري عبر الواتساب للطالب أو الصف -->
             <div id="whatsAppCenterSec" class="card active">
-                <h3 style="color:#25D366; margin-top:0;">💬 مركز إرسال رسائل الواتساب للطلاب ولأولياء الأمور</h3>
+                <h3 style="color:#25D366; margin-top:0;">💬 مركز إرسال رسائل الواتساب (لطالب معين أو للصف كاملاً)</h3>
                 <div style="background:#f1f8e9; padding:15px; border-radius:8px; border:1px solid #c8e6c9;">
                     <label><b>1. اختر الصف الدراسي:</b></label>
                     <select id="waClassSelect" onchange="loadStudentsForWhatsApp()">
@@ -629,13 +622,23 @@ def admin_dashboard():
                         ''' + classes_wa_opts + '''
                     </select>
 
-                    <label style="margin-top:12px; display:block;"><b>2. اختر الطالب:</b></label>
-                    <select id="waStudentSelect" onchange="fillStudentPhone()">
-                        <option value="">-- اختر الطالب أولاً --</option>
-                    </select>
+                    <div style="margin-top:12px; display:flex; gap:15px; align-items:center;">
+                        <label style="cursor:pointer; font-weight:bold; color:#0d47a1;"><input type="radio" name="waTargetMode" value="student" checked onchange="toggleWaMode()"> مراسلة طالب معين</label>
+                        <label style="cursor:pointer; font-weight:bold; color:#2e7d32;"><input type="radio" name="waTargetMode" value="class" onchange="toggleWaMode()"> مراسلة الصف كاملاً (إرسال عام)</label>
+                    </div>
 
-                    <label style="margin-top:12px; display:block;"><b>رقم الهاتف للواتساب (تلقائي أو أدخله يدوياً):</b></label>
-                    <input type="text" id="waPhoneInput" placeholder="مثال: 78918411 أو 96178918411">
+                    <div id="singleStudentBox" style="margin-top:12px;">
+                        <label><b>2. اختر الطالب:</b></label>
+                        <select id="waStudentSelect" onchange="fillStudentPhone()">
+                            <option value="">-- اختر الطالب أولاً --</option>
+                        </select>
+                        <label style="margin-top:8px; display:block;"><b>رقم الهاتف للواتساب:</b></label>
+                        <input type="text" id="waPhoneInput" placeholder="مثال: 78918411">
+                    </div>
+
+                    <div id="classBroadcastBox" style="margin-top:12px; display:none; background:#e8f5e9; padding:10px; border-radius:6px;">
+                        <p style="margin:0; font-size:13px; color:#2e7d32; font-weight:bold;">📢 سيتم توجيه الرسالة لكل طلاب هذا الصف. (اختر القالب أو اكتب الرسالة العامة أدناه).</p>
+                    </div>
 
                     <label style="margin-top:12px; display:block;"><b>3. نص الرسالة المراد إرسالها:</b></label>
                     <textarea id="waMessageInput" placeholder="اكتب نص الرسالة هنا..." style="height:90px;"></textarea>
@@ -643,29 +646,49 @@ def admin_dashboard():
                     <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
                         <button type="button" onclick="setWaTemplate('absence')" style="background:#e65100; width:auto; font-size:12px;">قالب: إشعار غياب</button>
                         <button type="button" onclick="setWaTemplate('exam')" style="background:#1565c0; width:auto; font-size:12px;">قالب: تذكير امتحان</button>
-                        <button type="button" onclick="setWaTemplate('general')" style="background:#37474f; width:auto; font-size:12px;">قالب: تعميم عام</button>
+                        <button type="button" onclick="setWaTemplate('general')" style="background:#37474f; width:auto; font-size:12px;">قالب: تعميم عام للصف</button>
                     </div>
 
                     <div style="margin-top:15px;">
-                        <a href="javascript:void(0)" onclick="sendWhatsAppNow()" class="wa-btn">📲 فتح وتوجيه إلى الواتساب فوراً</a>
+                        <button type="button" onclick="sendWhatsAppMessage()" class="wa-btn" style="width:100%;">📲 فتح وتوجيه إلى الواتساب فوراً</button>
                     </div>
                 </div>
             </div>
 
             <!-- مركز الواتساب للأساتذة -->
             <div id="whatsAppTeacherSec" class="card">
-                <h3 style="color:#25D366; margin-top:0;">📲 إرسال رسالة واتساب للأستاذ</h3>
+                <h3 style="color:#25D366; margin-top:0;">📲 مراسلة أستاذ مباشرة وإرسال الحساب</h3>
                 <label>اختر الأستاذ:</label>
-                <select id="waTeacherSelect">
+                <select id="waTeacherSelect" onchange="fillTeacherPhone()">
                     <option value="">-- اختر الأستاذ --</option>
                     ''' + teachers_wa_opts + '''
                 </select>
+                <label style="margin-top:10px; display:block;">رقم هاتف الأستاذ:</label>
+                <input type="text" id="waTeacherPhoneInput" placeholder="رقم الهاتف...">
                 <label style="margin-top:10px; display:block;">نص الرسالة:</label>
                 <textarea id="waTeacherMsg" placeholder="اكتب الرسالة..." style="height:80px;"></textarea>
-                <button type="button" onclick="sendTeacherWhatsApp()" class="wa-btn" style="margin-top:12px;">📲 إرسال عبر الواتساب</button>
+                <button type="button" onclick="sendTeacherWhatsApp()" class="wa-btn" style="margin-top:12px; width:100%;">📲 إرسال عبر الواتساب</button>
             </div>
 
-            <!-- إعدادات السنة الدراسية -->
+            <!-- جدول الأساتذة مع اليوزر والباسورد وزر الإرسال -->
+            <div id="teachersListSec" class="card">
+                <h3 style="color:#0d47a1; margin-top:0;">👨‍🏫 سجل الأساتذة ومعلومات الدخول (اسم المستخدم وكلمة المرور)</h3>
+                <form method="POST" style="margin-bottom:15px;">
+                    <input type="hidden" name="action" value="create_auto_accounts">
+                    <button type="submit" style="background:#2e7d32;">⚡ توليد حسابات الأساتذة من بطاقات الأساتذة</button>
+                </form>
+                <table>
+                    <tr>
+                        <th>اسم الأستاذ والمعلومات</th>
+                        <th>اسم المستخدم (Username)</th>
+                        <th>كلمة المرور (الرقم الآلي)</th>
+                        <th>رقم الهاتف</th>
+                        <th>إرسال الحساب واتساب</th>
+                    </tr>
+                    ''' + teachers_rows + '''
+                </table>
+            </div>
+
             <div id="academicYearSec" class="card">
                 <h3 style="color:#0d47a1; margin-top:0;">📅 التبديل وتحديد السنة الدراسية النشطة</h3>
                 <form action="/admin/set_academic_year" method="POST">
@@ -682,15 +705,7 @@ def admin_dashboard():
 
             <div id="studentGradesSec" class="card">
                 <h3 style="color:#0d47a1; margin-top:0;">📝 علامات ونتائج الطلاب</h3>
-                <p>يمكن استعراض العلامات واستخراج كشوفات النتائج بكل سهولة.</p>
-            </div>
-
-            <div id="teachersListSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">👨‍🏫 سجل الأساتذة وعقود الساعات</h3>
-                <form method="POST">
-                    <input type="hidden" name="action" value="create_auto_accounts">
-                    <button type="submit" style="background:#2e7d32;">⚡ توليد حسابات الأساتذة من بطاقات الأساتذة</button>
-                </form>
+                <p>استعراض علامات الطلاب.</p>
             </div>
 
             <div id="uploadDirectorateFilesSec" class="card">
@@ -699,9 +714,9 @@ def admin_dashboard():
                     <input type="hidden" name="action" value="upload_directorate_file">
                     <label>نوع الملف:</label>
                     <select name="file_key" required>
-                        <option value="teachers_and_subjects">📋 1. الاستاذ والمواد (التوزيع الرسمي)</option>
+                        <option value="students_registered">📂 1. الطلاب المسجلون</option>
                         <option value="teachers_cards">📇 2. بطاقات الاساتذة</option>
-                        <option value="students_registered">📂 3. الطلاب المسجلون</option>
+                        <option value="teachers_and_subjects">📋 3. الاستاذ والمواد (التوزيع الرسمي)</option>
                     </select>
                     <input type="file" name="excel_file" accept=".xlsx, .xls" required style="margin-top:10px;">
                     <button type="submit" style="margin-top:12px; background:#2e7d32;">📥 رفع وتحديث البيانات</button>
@@ -741,19 +756,36 @@ def admin_dashboard():
                 if(target) target.classList.add('active');
             }
 
+            let currentClassStudents = [];
+
             function loadStudentsForWhatsApp() {
                 let cls = document.getElementById('waClassSelect').value;
                 let stdSelect = document.getElementById('waStudentSelect');
                 stdSelect.innerHTML = '<option value="">جاري التحميل...</option>';
+                currentClassStudents = [];
                 if(!cls) return;
                 
                 fetch('/api/get_students/' + encodeURIComponent(cls)).then(res => res.json()).then(data => {
+                    currentClassStudents = data.details;
                     let opts = '<option value="">-- اختر الطالب --</option>';
                     data.details.forEach(st => {
-                        opts += `<option value="${st.phone}" data-name="${st.name}">${st.name} ${st.phone ? '('+st.phone+')' : '(لا يوجد رقم)'}</option>`;
+                        opts += `<option value="${st.phone}" data-name="${st.name}">${st.name} ${st.phone ? '('+st.phone+')' : '(بدون رقم)'}</option>`;
                     });
                     stdSelect.innerHTML = opts;
                 });
+            }
+
+            function toggleWaMode() {
+                let mode = document.querySelector('input[name="waTargetMode"]:checked').value;
+                let singleBox = document.getElementById('singleStudentBox');
+                let classBox = document.getElementById('classBroadcastBox');
+                if(mode === 'student') {
+                    singleBox.style.display = 'block';
+                    classBox.style.display = 'none';
+                } else {
+                    singleBox.style.display = 'none';
+                    classBox.style.display = 'block';
+                }
             }
 
             function fillStudentPhone() {
@@ -762,33 +794,69 @@ def admin_dashboard():
                 if(phone) { document.getElementById('waPhoneInput').value = phone; }
             }
 
+            function fillTeacherPhone() {
+                let tSelect = document.getElementById('waTeacherSelect');
+                let phone = tSelect.value;
+                if(phone) { document.getElementById('waTeacherPhoneInput').value = phone; }
+            }
+
             function setWaTemplate(type) {
-                let stdSelect = document.getElementById('waStudentSelect');
-                let selectedOpt = stdSelect.options[stdSelect.selectedIndex];
-                let studentName = selectedOpt ? selectedOpt.getAttribute('data-name') || 'الطالب' : 'الطالب';
+                let mode = document.querySelector('input[name="waTargetMode"]:checked').value;
                 let msgBox = document.getElementById('waMessageInput');
 
-                if(type === 'absence') {
-                    msgBox.value = `حضرة ولي أمر الطالب/ة ${studentName} المحترم، نحيطكم علماً بتسجيل غياب عن الحصص الدراسية اليوم في معهد الهرمل الفني. يرجى التواصل مع الإدارة.`;
-                } else if(type === 'exam') {
-                    msgBox.value = `جانب الطالب/ة ${studentName} المحترم، نذكركم بموعد الامتحان القادم في معهد الهرمل الفني. نتمنى لكم التوفيق والنجاح.`;
-                } else if(type === 'general') {
-                    msgBox.value = `جانب الطالب/ة ${studentName}، تحية طيبة من إدارة معهد الهرمل الفني الرسمية.`;
+                if(mode === 'student') {
+                    let stdSelect = document.getElementById('waStudentSelect');
+                    let selectedOpt = stdSelect.options[stdSelect.selectedIndex];
+                    let studentName = selectedOpt ? selectedOpt.getAttribute('data-name') || 'الطالب' : 'الطالب';
+                    if(type === 'absence') {
+                        msgBox.value = `حضرة ولي أمر الطالب/ة ${studentName} المحترم، نحيطكم علماً بتسجيل غياب عن الحصص الدراسية اليوم في معهد الهرمل الفني.`;
+                    } else if(type === 'exam') {
+                        msgBox.value = `جانب الطالب/ة ${studentName} المحترم، نذكركم بموعد الامتحان القادم في معهد الهرمل الفني. نتمنى لكم التوفيق والنجاح.`;
+                    } else if(type === 'general') {
+                        msgBox.value = `جانب الطالب/ة ${studentName}، تحية طيبة من إدارة معهد الهرمل الفني الرسمية.`;
+                    }
+                } else {
+                    let clsName = document.getElementById('waClassSelect').value || 'الصف';
+                    if(type === 'absence') {
+                        msgBox.value = `تنبيه لطلاب صف ${clsName} في معهد الهرمل الفني: يرجى الانتباه للدوام المدرسي.`;
+                    } else if(type === 'exam') {
+                        msgBox.value = `تنويه هام لطلاب صف ${clsName}: نذكركم بمواعيد الامتحانات القادمة. نتمنى للجميع النجاح.`;
+                    } else if(type === 'general') {
+                        msgBox.value = `تعميم إداري هام صادر عن إدارة معهد الهرمل الفني لطلاب صف ${clsName}: ...`;
+                    }
                 }
             }
 
-            function sendWhatsAppNow() {
-                let phone = document.getElementById('waPhoneInput').value.replace(/\D/g, '');
+            function sendWhatsAppMessage() {
+                let mode = document.querySelector('input[name="waTargetMode"]:checked').value;
                 let msg = encodeURIComponent(document.getElementById('waMessageInput').value);
-                if(!phone) { alert("يرجى إدخال أو اختيار رقم الهاتف أولاً"); return; }
-                if(!phone.startsWith('961') && phone.length <= 8) { phone = '961' + phone; }
-                window.open(`https://wa.me/${phone}?text=${msg}`, '_blank');
+
+                if(mode === 'student') {
+                    let phone = document.getElementById('waPhoneInput').value.replace(/\D/g, '');
+                    if(!phone) { alert("يرجى إدخال أو اختيار رقم الهاتف أولاً"); return; }
+                    if(!phone.startsWith('961') && phone.length <= 8) { phone = '961' + phone; }
+                    window.open(`https://wa.me/${phone}?text=${msg}`, '_blank');
+                } else {
+                    if(currentClassStudents.length === 0) { alert("لا توجد أسماء طلاب في هذا الصف أو لم يتم تحميلهم"); return; }
+                    let validStudents = currentClassStudents.filter(st => st.phone && st.phone.trim() !== '');
+                    if(validStudents.length === 0) { alert("لا توجد أرقام هواتف مسجلة لطلاب هذا الصف"); return; }
+                    
+                    if(confirm(`سيتم فتح محادثات واتساب تباعاً لـ (${validStudents.length}) طالب لديهم أرقام هواتف. هل تريد المتابعة؟`)) {
+                        validStudents.forEach((st, idx) => {
+                            let phone = st.phone.replace(/\D/g, '');
+                            if(!phone.startsWith('961') && phone.length <= 8) { phone = '961' + phone; }
+                            setTimeout(() => {
+                                window.open(`https://wa.me/${phone}?text=${msg}`, '_blank');
+                            }, idx * 600);
+                        });
+                    }
+                }
             }
 
             function sendTeacherWhatsApp() {
-                let phone = document.getElementById('waTeacherSelect').value.replace(/\D/g, '');
+                let phone = document.getElementById('waTeacherPhoneInput').value.replace(/\D/g, '');
                 let msg = encodeURIComponent(document.getElementById('waTeacherMsg').value);
-                if(!phone) { alert("يرجى اختيار الأستاذ أولاً"); return; }
+                if(!phone) { alert("يرجى اختيار الأستاذ أو إدخال رقم الهاتف أولاً"); return; }
                 if(!phone.startsWith('961') && phone.length <= 8) { phone = '961' + phone; }
                 window.open(`https://wa.me/${phone}?text=${msg}`, '_blank');
             }
@@ -801,12 +869,10 @@ def admin_dashboard():
 @app.route('/teacher', methods=['GET', 'POST'])
 def teacher_dashboard():
     if session.get('role') != 'teacher': return redirect(url_for('login'))
-    
     username = session.get('username')
     user_data = teachers_db.get(username, {})
     t_name = user_data.get('name', '').strip()
     msg = ''
-
     teacher_assignments = get_teacher_assignments(t_name)
 
     if request.method == 'POST':
@@ -845,10 +911,8 @@ def teacher_dashboard():
             <div><h3 style="margin:0;">معهد الهرمل الفني</h3><small>الأستاذ: {{ t_name }}</small></div>
             <a href="/logout" style="color:#ffcdd2; background:#c62828; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px;">خروج</a>
         </div>
-
         <div style="padding:15px;">
             {% if msg %}<div style="background:#e8f5e9; color:#2e7d32; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold;">{{ msg }}</div>{% endif %}
-
             <div class="card">
                 <h4 style="color:#0d47a1; margin-top:0;">📝 إدخال ورصد علامات الطلاب (0 إلى 20 أو غائب):</h4>
                 <form method="POST">
@@ -863,7 +927,6 @@ def teacher_dashboard():
                 </form>
             </div>
         </div>
-
         <script>
             function loadStudentsForGrades() {
                 let val = document.getElementById('gradePair').value;
@@ -872,7 +935,6 @@ def teacher_dashboard():
                 cont.innerHTML = '';
                 if(!val || !val.includes('|')) { btn.style.display='none'; return; }
                 let className = val.split('|')[0];
-
                 fetch('/api/get_students/' + encodeURIComponent(className)).then(res => res.json()).then(data => {
                     let html = '<p style="font-size:13px; color:#555;">حدد العلامة للطالب:</p>';
                     data.students.forEach(st => {
@@ -892,7 +954,7 @@ def teacher_dashboard():
 
 @app.route('/logout')
 def logout():
-    session.clear()
+    session.load = session.clear()
     return redirect(url_for('login'))
 
 if __name__ == '__main__':
