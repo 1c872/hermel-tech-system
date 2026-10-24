@@ -57,6 +57,7 @@ def init_db_table():
 
 init_db_table()
 
+# قواعد البيانات المتكاملة (مع الحفاظ على الحفظ والاسترجاع)
 teachers_db = {}
 grades_db = {}            
 attendance_db = {}        
@@ -71,6 +72,13 @@ current_academic_year = "2025-2026"
 
 field_sessions = []
 teacher_absences_log = []
+
+# قاعدة بيانات المستشفيات ومواقع GPS والخدمات المحفوظة
+hospitals_gps_db = [
+    {"name": "مستشفى الهرمل الحكومي", "type": "مستشفى رئيسي", "phone": "08-200111", "lat": 34.3901, "lng": 36.3822, "address": "الهرمل - الشارع العام"},
+    {"name": "مستشفى البتول", "type": "مستشفى", "phone": "08-200222", "lat": 34.3850, "lng": 36.3800, "address": "الهرمل - الدورة"},
+    {"name": "معهد الهرمل الفني الرسمي", "type": "مقر المعهد", "phone": "08-200333", "lat": 34.3880, "lng": 36.3810, "address": "طريق الدورة - الشارع الرئيسي"}
+]
 
 directorate_excel_tables = {
     "students_registered": {"title": "الطلاب المسجلون", "columns": [], "data": []},
@@ -122,6 +130,7 @@ def save_to_disk():
             'academic_years_db': academic_years_db,
             'current_academic_year': current_academic_year,
             'field_sessions': field_sessions,
+            'hospitals_gps_db': hospitals_gps_db,
             'directorate_excel_tables': directorate_excel_tables
         }
         json_str = json.dumps(data, ensure_ascii=False)
@@ -144,7 +153,7 @@ def save_to_disk():
 
 def load_from_disk():
     global teachers_db, grades_db, attendance_db, teacher_classes_map, classes_students, students_contact_info
-    global admin_replies, admin_credentials, academic_years_db, current_academic_year, field_sessions, directorate_excel_tables
+    global admin_replies, admin_credentials, academic_years_db, current_academic_year, field_sessions, hospitals_gps_db, directorate_excel_tables
     
     conn = get_db_connection()
     if conn:
@@ -167,6 +176,7 @@ def load_from_disk():
                 academic_years_db = data.get('academic_years_db', academic_years_db)
                 current_academic_year = data.get('current_academic_year', current_academic_year)
                 field_sessions = data.get('field_sessions', [])
+                hospitals_gps_db = data.get('hospitals_gps_db', hospitals_gps_db)
                 directorate_excel_tables = data.get('directorate_excel_tables', directorate_excel_tables)
                 return True
         except Exception as e:
@@ -188,6 +198,7 @@ def load_from_disk():
                 academic_years_db = data.get('academic_years_db', academic_years_db)
                 current_academic_year = data.get('current_academic_year', current_academic_year)
                 field_sessions = data.get('field_sessions', [])
+                hospitals_gps_db = data.get('hospitals_gps_db', hospitals_gps_db)
                 directorate_excel_tables = data.get('directorate_excel_tables', directorate_excel_tables)
                 return True
         except Exception as e:
@@ -260,8 +271,6 @@ HEADER_VTE_HTML = '''
             <a href="javascript:void(0)" onclick="showSection('teachersListSec')">👨‍🏫 سجل الأساتذة وعقود الساعات</a>
             <a href="javascript:void(0)" onclick="showSection('viewTeachersCards')">📇 بطاقات الاساتذة والمعلومات الشخصية</a>
             <a href="javascript:void(0)" onclick="showSection('viewWeeklySchedule')">📅 البرنامج الأسبوعي والأساتذة والمواد</a>
-            <a href="javascript:void(0)" onclick="showSection('viewExecutedHours')">⏱️ الساعات المنفذة شهرياً</a>
-            <a href="javascript:void(0)" onclick="showSection('viewTransportDays')">🚗 بدل وأيام النقل شهرياً</a>
         </div>
     </div>
 
@@ -274,12 +283,18 @@ HEADER_VTE_HTML = '''
     </div>
 
     <div class="dropdown">
+        <button class="dropbtn">الخدمات والـ GPS 📍 ▾</button>
+        <div class="dropdown-content">
+            <a href="javascript:void(0)" onclick="showSection('gpsHospitalsSec')">🏥 دليل المستشفيات ومواقع GPS</a>
+        </div>
+    </div>
+
+    <div class="dropdown">
         <button class="dropbtn">إعدادات وإدارة ▾</button>
         <div class="dropdown-content">
             <a href="javascript:void(0)" onclick="showSection('academicYearSec')">📅 التبديل بين الأعوام الدراسية</a>
             <a href="javascript:void(0)" onclick="showSection('uploadDirectorateFilesSec')">⚙️ رفع ملفات المديرية (Excel)</a>
             <a href="javascript:void(0)" onclick="showSection('deviceBindingSec')">📱 إدارة أجهزة الأساتذة (فك الربط)</a>
-            <a href="javascript:void(0)" onclick="showSection('sendNotifSec')">📢 إرسال تعميم / تنبيه</a>
             <a href="javascript:void(0)" onclick="showSection('backupSec')">💾 النسخ الاحتياطي والاسترداد</a>
             <a href="javascript:void(0)" onclick="showSection('changePassSec')">🔑 تغيير كلمة السر الإدارية</a>
         </div>
@@ -429,14 +444,25 @@ def admin_dashboard():
     if request.method == 'POST':
         action = request.form.get('action')
         
-        if action == 'restore_backup_file':
-            file = request.files.get('backup_file')
-            if file and file.filename.endswith('.json'):
-                try:
-                    file.save(DB_FILE)
-                    load_from_disk()
-                    msg = "تم استرداد قاعدة البيانات بالكامل وتحديث كافة السجلات بنجاح! ✅"
-                except Exception as e: msg = f"خطأ في استرداد الملف: {e}"
+        if action == 'add_hospital_gps':
+            h_name = request.form.get('h_name', '').strip()
+            h_type = request.form.get('h_type', '').strip()
+            h_phone = request.form.get('h_phone', '').strip()
+            h_address = request.form.get('h_address', '').strip()
+            h_lat = request.form.get('h_lat', '34.3880').strip()
+            h_lng = request.form.get('h_lng', '36.3810').strip()
+            if h_name:
+                try: lat_val = float(h_lat)
+                except: lat_val = 34.3880
+                try: lng_val = float(h_lng)
+                except: lng_val = 36.3810
+                
+                hospitals_gps_db.append({
+                    "name": h_name, "type": h_type, "phone": h_phone,
+                    "lat": lat_val, "lng": lng_val, "address": h_address
+                })
+                save_to_disk()
+                msg = "تم إضافة الموقع / المستشفى إلى الخريطة بنجاح! ✅"
 
         elif action == 'upload_directorate_file':
             file_key = request.form.get('file_key')
@@ -521,7 +547,6 @@ def admin_dashboard():
                 except Exception as e: msg = f"خطأ في قراءة ملف الإكسل: {e}"
 
         elif action == 'create_auto_accounts':
-            teachers_db.clear()
             t_cards = directorate_excel_tables.get('teachers_cards', {}).get('data', [])
             count = 0
             for card in t_cards:
@@ -583,6 +608,18 @@ def admin_dashboard():
         </tr>
         """
 
+    hospitals_rows = ""
+    for h in hospitals_gps_db:
+        hospitals_rows += f"""
+        <tr>
+            <td><b>{h['name']}</b></td>
+            <td>{h['type']}</td>
+            <td>{h.get('phone', 'غير محدد')}</td>
+            <td>{h.get('address', 'الهرمل')}</td>
+            <td><a href="https://maps.google.com/?q={h['lat']},{h['lng']}" target="_blank" style="background:#1565c0; color:white; padding:5px 10px; border-radius:4px; text-decoration:none; font-size:12px;">🗺️ فتح عبر الخريطة (GPS)</a></td>
+        </tr>
+        """
+
     teachers_wa_opts = "".join([f"<option value='{t.get('phone', '')}'>{t['name']} - {t.get('phone', 'بدون رقم')}</option>" for u, t in sorted_teachers_list])
     classes_wa_opts = "".join([f"<option value='{c}'>{c}</option>" for c in classes_students.keys()])
     year_select_opts = "".join([f"<option value='{y}' {'selected' if y==current_academic_year else ''}>{y}</option>" for y in academic_years_db])
@@ -637,7 +674,7 @@ def admin_dashboard():
                     </div>
 
                     <div id="classBroadcastBox" style="margin-top:12px; display:none; background:#e8f5e9; padding:10px; border-radius:6px;">
-                        <p style="margin:0; font-size:13px; color:#2e7d32; font-weight:bold;">📢 سيتم توجيه الرسالة لكل طلاب هذا الصف. (اختر القالب أو اكتب الرسالة العامة أدناه).</p>
+                        <p style="margin:0; font-size:13px; color:#2e7d32; font-weight:bold;">📢 سيتم توجيه الرسالة لكل طلاب هذا الصف.</p>
                     </div>
 
                     <label style="margin-top:12px; display:block;"><b>3. نص الرسالة المراد إرسالها:</b></label>
@@ -670,7 +707,43 @@ def admin_dashboard():
                 <button type="button" onclick="sendTeacherWhatsApp()" class="wa-btn" style="margin-top:12px; width:100%;">📲 إرسال عبر الواتساب</button>
             </div>
 
-            <!-- جدول الأساتذة مع اليوزر والباسورد وزر الإرسال -->
+            <!-- دليل المستشفيات والـ GPS (الميزة المدمجة) -->
+            <div id="gpsHospitalsSec" class="card">
+                <h3 style="color:#0d47a1; margin-top:0;">🏥 دليل المستشفيات ومواقع GPS والخدمات</h3>
+                <p style="font-size:13px; color:#555;">المواقع الحيوية والمستشفيات في الهرمل ومحيط المعهد:</p>
+                <table>
+                    <tr>
+                        <th>اسم المكان / المستشفى</th>
+                        <th>التصنيف</th>
+                        <th>رقم الهاتف</th>
+                        <th>العنوان</th>
+                        <th>الموقع (GPS)</th>
+                    </tr>
+                    ''' + hospitals_rows + '''
+                </table>
+
+                <div style="margin-top:20px; background:#e3f2fd; padding:15px; border-radius:8px;">
+                    <h4 style="margin-top:0; color:#0d47a1;">➕ إضافة موقع أو مستشفى جديد</h4>
+                    <form method="POST">
+                        <input type="hidden" name="action" value="add_hospital_gps">
+                        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                            <input type="text" name="h_name" placeholder="اسم المستشفى أو الموقع" required style="flex:1; min-width:200px;">
+                            <input type="text" name="h_type" placeholder="التصنيف (مستشفى، مركز،...)" required style="flex:1; min-width:150px;">
+                        </div>
+                        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:8px;">
+                            <input type="text" name="h_phone" placeholder="رقم الهاتف" style="flex:1;">
+                            <input type="text" name="h_address" placeholder="العنوان بالتفصيل" style="flex:1;">
+                        </div>
+                        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:8px;">
+                            <input type="text" name="h_lat" placeholder="خط العرض Lat (مثال: 34.3880)" style="flex:1;">
+                            <input type="text" name="h_lng" placeholder="خط الطول Lng (مثال: 36.3810)" style="flex:1;">
+                        </div>
+                        <button type="submit" style="margin-top:12px; background:#2e7d32;">💾 حفظ وإضافة الموقع للقاعدة</button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- جدول الأساتذة وتوليد الحسابات -->
             <div id="teachersListSec" class="card">
                 <h3 style="color:#0d47a1; margin-top:0;">👨‍🏫 سجل الأساتذة ومعلومات الدخول (اسم المستخدم وكلمة المرور)</h3>
                 <form method="POST" style="margin-bottom:15px;">
@@ -954,7 +1027,7 @@ def teacher_dashboard():
 
 @app.route('/logout')
 def logout():
-    session.load = session.clear()
+    session.clear()
     return redirect(url_for('login'))
 
 if __name__ == '__main__':
