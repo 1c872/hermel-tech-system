@@ -92,7 +92,8 @@ def save_to_disk():
         }
         with open(DB_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        shutil.copyfile(DB_FILE, BACKUP_FILE)
+        if os.path.exists(DB_FILE):
+            shutil.copyfile(DB_FILE, BACKUP_FILE)
     except Exception as e:
         print(f"Error saving database: {e}")
 
