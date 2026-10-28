@@ -19,7 +19,6 @@ ALLOWED_EXTENSIONS = {'xlsx', 'xls'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# المتغيرات الأساسية
 teachers_db = {}
 grades_db = {}            
 attendance_db = {}        
@@ -70,26 +69,19 @@ def load_from_disk():
                 data = json.load(f)
                 teachers_db.clear()
                 teachers_db.update(data.get('teachers_db', {}))
-                
                 grades_db.clear()
                 grades_db.update(data.get('grades_db', {}))
-                
                 attendance_db.clear()
                 attendance_db.update(data.get('attendance_db', {}))
-                
                 classes_students.clear()
                 classes_students.update(data.get('classes_students', {}))
-                
                 directorate_excel_tables.clear()
                 directorate_excel_tables.update(data.get('directorate_excel_tables', directorate_excel_tables))
-                
-                print("تم استرجاع البيانات بنجاح من الملف المحمي!")
                 return True
         except Exception as e:
             print(f"Error loading database file: {e}")
     return False
 
-# استدعاء تحميل البيانات فور إقلاع البرنامج لضمان عدم ضياعها أبداً
 load_from_disk()
 
 def allowed_file(filename):
@@ -168,22 +160,11 @@ HEADER_VTE_HTML = '''
     <a href="/admin" style="color:white; text-decoration:none; padding:12px 16px; font-weight:bold; font-size:14px; background:#0d47a1;">🏠 الرئيسية</a>
     
     <div class="dropdown">
-        <button class="dropbtn">الطلاب ▾</button>
-        <div class="dropdown-content">
-            <a href="javascript:void(0)" onclick="showSection('studentAttendanceSec')">📋 حضور وغياب الطلاب</a>
-            <a href="javascript:void(0)" onclick="showSection('studentGradesSec')">📝 علامات ونتائج الطلاب</a>
-            <a href="javascript:void(0)" onclick="showSection('viewRegisteredStudents')">📂 جدول الطلاب المسجلون</a>
-        </div>
-    </div>
-
-    <div class="dropdown">
         <button class="dropbtn">الأساتذة والدوام (بصمة) ▾</button>
         <div class="dropdown-content">
             <a href="javascript:void(0)" onclick="showSection('teachersListSec')">👨‍🏫 سجل الأساتذة وحسابات الدخول والبصمة</a>
             <a href="javascript:void(0)" onclick="showSection('deviceConfigSec')">🖧 إعدادات جهاز البصمة ومراقبة الـ LAN</a>
             <a href="javascript:void(0)" onclick="showSection('dailyAttendanceReportSec')">📊 تقرير الدوام اليومي والغياب (Live LAN)</a>
-            <a href="javascript:void(0)" onclick="showSection('viewWeeklySchedule')">📅 البرنامج الأسبوعي والمواد والحصص</a>
-            <a href="javascript:void(0)" onclick="showSection('viewFingerprintIds')">🆔 أرقام بصمات الشيتات الثلاثة (IDs)</a>
         </div>
     </div>
 
@@ -210,6 +191,7 @@ HEADER_VTE_HTML = '''
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     error = ''
+    client_ip = request.remote_addr # الحصول على عنوان آي بي الجهاز المتصل
     if request.method == 'POST':
         username = request.form.get('username', '').strip().lower()
         password = request.form.get('password', '').strip()
@@ -219,6 +201,17 @@ def login():
             session['role'] = 'admin'
             return redirect(url_for('admin_dashboard'))
         elif username in teachers_db and teachers_db[username]['password'] == password:
+            t_data = teachers_db[username]
+            bound_device = t_data.get('bound_device', '')
+            
+            # قفل الجهاز: إذا كان الأستاذ مرتبطاً بجهاز معين ولم يتم تسجيل جهازه مسبقاً، نربطه أو نتحقق منه
+            if not bound_device:
+                teachers_db[username]['bound_device'] = client_ip
+                save_to_disk()
+            elif bound_device != client_ip:
+                error = f'عذراً! هذا الحساب مرتبط بجهاز آخر (IP: {bound_device}). لا يمكنك الدخول من هذا الجهاز.'
+                return render_template_string(login_template, error=error)
+
             session['username'] = username
             session['role'] = 'teacher'
             return redirect(url_for('teacher_dashboard'))
@@ -247,7 +240,7 @@ login_template = '''
             <img src="https://cdn-icons-png.flaticon.com/512/3135/3135755.png" width="60" style="margin-bottom:5px;">
             <div style="font-size:13px; color:#555; font-weight:bold;">الجمهورية اللبنانية 🌲</div>
             <h2>معهد الهرمل الفني</h2>
-            <small style="color:#0d47a1; display:block; margin-bottom:15px;">نظام الإدارة والدوام والبصمة الآمن</small>
+            <small style="color:#0d47a1; display:block; margin-bottom:15px;">نظام الحماية وقفل الجهاز المعتمد</small>
             <form method="POST">
                 <input type="text" name="username" placeholder="اسم المستخدم" required>
                 <input type="password" name="password" placeholder="كلمة المرور" required>
@@ -272,45 +265,25 @@ def admin_dashboard():
         if action == 'upload_directorate_file':
             file_key = request.form.get('file_key')
             file = request.files.get('excel_file')
-            
             if file and allowed_file(file.filename) and file_key in directorate_excel_tables:
                 try:
                     df = pd.read_excel(file)
                     col_mapping = {col: str(col).strip() for col in df.columns}
                     df_renamed = df.rename(columns=col_mapping)
-                    rows_data = []
-                    for _, row in df_renamed.iterrows():
-                        row_dict = {str(col): ("" if pd.isna(row[col]) else str(row[col]).strip()) for col in df_renamed.columns}
-                        rows_data.append(row_dict)
-                    
-                    title_map = {
-                        "students_registered": "الطلاب المسجلون",
-                        "teachers_cards": "بطاقات الاساتذة",
-                        "personal_info": "المعلومات الشخصية",
-                        "weekly_schedule": "برنامج اسبوعي مع الاساتذة والمواد",
-                        "executed_hours": "الساعات المنفذة للاساتذة",
-                        "fingerprint_ids": "أرقام بصمات الأساتذة (الشيتات الثلاثة)"
-                    }
-                    
-                    directorate_excel_tables[file_key] = {
-                        "title": title_map.get(file_key, "ملف المديرية"),
-                        "columns": list(df_renamed.columns),
-                        "data": rows_data
-                    }
+                    rows_data = [{str(col): ("" if pd.isna(row[col]) else str(row[col]).strip()) for col in df_renamed.columns} for _, row in df_renamed.iterrows()]
+                    directorate_excel_tables[file_key] = {"title": "ملف المديرية", "columns": list(df_renamed.columns), "data": rows_data}
                     
                     if file_key == 'weekly_schedule':
                         file.seek(0)
-                        parsed = parse_schedule_excel(file)
-                        directorate_excel_tables['weekly_schedule']['parsed_schedule'] = parsed
-
+                        directorate_excel_tables['weekly_schedule']['parsed_schedule'] = parse_schedule_excel(file)
                     if file_key == 'fingerprint_ids':
                         file.seek(0)
-                        parsed_ids, cats = parse_fingerprint_ids(file)
-                        directorate_excel_tables['fingerprint_ids']['parsed_ids'] = parsed_ids
+                        p_ids, cats = parse_fingerprint_ids(file)
+                        directorate_excel_tables['fingerprint_ids']['parsed_ids'] = p_ids
                         directorate_excel_tables['fingerprint_ids']['categories'] = cats
 
                     save_to_disk()
-                    msg = "تم رفع وتحديث الملف بنجاح! تم حفظ البيانات في ملف النظام المحمي."
+                    msg = "تم رفع وتحديث الملف وحفظه بنجاح!"
                 except Exception as e:
                     msg = f"خطأ في قراءة ملف الإكسل: {e}"
 
@@ -328,16 +301,17 @@ def admin_dashboard():
                         "category": cat,
                         "fingerprint_id": f_id,
                         "official_shift": "07:50 - 13:30" if cat in ['الملاك', 'شراء الخدمات'] else "حسب البرنامج",
-                        "device_ip": "192.168.1.201"
+                        "bound_device": ""
                     }
                     count += 1
             save_to_disk()
-            msg = f"تم توليد ({count}) حساب للأساتذة والموظفين من ملف البصمة بنجاح!"
+            msg = f"تم توليد ({count}) حساب للأساتذة بنجاح!"
 
         elif action == 'add_single_teacher':
             t_name = request.form.get('teacher_name', '').strip()
             cat = request.form.get('category', 'متعاقدين')
             f_id = request.form.get('fingerprint_id', '').strip()
+            shift = request.form.get('official_shift', '07:50 - 13:30')
             if t_name and f_id:
                 user_id = f"teacher_{f_id}"
                 teachers_db[user_id] = {
@@ -345,68 +319,55 @@ def admin_dashboard():
                     "password": "123",
                     "category": cat,
                     "fingerprint_id": int(f_id),
-                    "official_shift": "07:50 - 13:30" if cat in ['الملاك', 'شراء الخدمات'] else "حسب البرنامج",
-                    "device_ip": "192.168.1.201"
+                    "official_shift": shift,
+                    "bound_device": ""
                 }
                 save_to_disk()
-                msg = f"تم إضافة الأستاذ '{t_name}' وخلق حساب يوزر خاص به بنجاح!"
+                msg = f"تم إضافة الأستاذ '{t_name}' وتوليد حسابه بنجاح!"
+
+        elif action == 'edit_teacher':
+            t_key = request.form.get('teacher_key')
+            if t_key in teachers_db:
+                teachers_db[t_key]['name'] = request.form.get('teacher_name', '').strip()
+                teachers_db[t_key]['category'] = request.form.get('category', '').strip()
+                teachers_db[t_key]['fingerprint_id'] = int(request.form.get('fingerprint_id', 0))
+                teachers_db[t_key]['official_shift'] = request.form.get('official_shift', '').strip()
+                if request.form.get('reset_device') == 'on':
+                    teachers_db[t_key]['bound_device'] = '' # إبطال قفل الجهاز ليتمكن من الدخول من جهاز جديد
+                save_to_disk()
+                msg = f"تم تعديل بيانات الأستاذ بنجاح!"
 
         elif action == 'delete_teacher':
             t_key = request.form.get('teacher_key')
             if t_key in teachers_db:
-                removed_name = teachers_db[t_key]['name']
                 del teachers_db[t_key]
                 save_to_disk()
-                msg = f"تم حذف الأستاذ '{removed_name}' وإزالة حسابه بنجاح!"
-
-        elif action == 'save_device_config':
-            device_ip = request.form.get('device_ip')
-            device_port = request.form.get('device_port')
-            for u, t in teachers_db.items():
-                t['device_ip'] = device_ip
-            save_to_disk()
-            msg = f"تم حفظ إعدادات جهاز البصمة وتفعيل نظام المراقبة عبر الـ LAN بنجاح!"
+                msg = f"تم حذف الأستاذ بنجاح!"
 
     teachers_rows = ""
     for u, t in teachers_db.items():
         cat = t.get('category', 'متعاقدين')
-        shift = "07:50 إلى 1:30 ظهراً" if cat in ['الملاك', 'شراء الخدمات'] else "حسب الحصص الأسبوعية"
+        shift = t.get('official_shift', '07:50 إلى 1:30 ظهراً')
+        bound_dev = t.get('bound_device', '')
+        device_status = f"<code style='color:#0d47a1;'>مرتبط بـ: {bound_dev}</code>" if bound_dev else "<span style='color:#c62828;'>غير مرتبط بجهاز بعد</span>"
+        
         teachers_rows += f"""
         <tr>
             <td><b>{t['name']}</b></td>
             <td><span style='background:#e3f2fd; color:#0d47a1; padding:3px 8px; border-radius:4px; font-size:12px;'>{cat}</span></td>
             <td><code style='color:#0d47a1;'>{u}</code></td>
-            <td><code>{t['password']}</code></td>
             <td><code style='color:#2e7d32; font-weight:bold;'>{t.get('fingerprint_id')}</code></td>
-            <td style='font-size:12px; color:#555;'>{shift}</td>
+            <td style='font-size:12px; color:#333; font-weight:bold;'>{shift}</td>
+            <td>{device_status}</td>
             <td>
-                <form method="POST" onsubmit="return confirm('هل أنت متأكد من حذف هذا الأستاذ؟');" style="margin:0;">
+                <button type="button" onclick="openEditModal('{u}', '{t['name']}', '{cat}', '{t.get('fingerprint_id')}', '{shift}')" style="background:#1976d2; padding:5px 10px; font-size:12px; width:auto; margin-bottom:4px;">✏️ تعديل</button>
+                <form method="POST" onsubmit="return confirm('هل أنت متأكد من حذف هذا الأستاذ؟');" style="margin:0; display:inline;">
                     <input type="hidden" name="action" value="delete_teacher">
                     <input type="hidden" name="teacher_key" value="{u}">
                     <button type="submit" style="background:#c62828; padding:5px 10px; font-size:12px; width:auto;">🗑️ حذف</button>
                 </form>
             </td>
         </tr>
-        """
-
-    directorate_htmls = {}
-    for k, tinfo in directorate_excel_tables.items():
-        cols = tinfo['columns']
-        rows = tinfo['data']
-        headers_th = "".join([f"<th>{c}</th>" for c in cols]) if cols else "<th>لا توجد أعمدة</th>"
-        body_tr = ""
-        if rows:
-            for r in rows[:50]:
-                tds = "".join([f"<td>{r.get(c, '')}</td>" for c in cols])
-                body_tr += f"<tr>{tds}</tr>"
-        else:
-            body_tr = f"<tr><td colspan='{len(cols) or 1}'>لم يتم رفع بيانات لهذا الملف بعد</td></tr>"
-
-        directorate_htmls[k] = f"""
-        <div style="background:white; border:1px solid #bbdefb; border-radius:8px; padding:15px; margin-bottom:20px;">
-            <h4 style="color:#0d47a1; margin-top:0;">📂 {tinfo['title']}</h4>
-            <div style="overflow-x:auto;"><table><tr>{headers_th}</tr>{body_tr}</table></div>
-        </div>
         """
 
     admin_template = '''
@@ -418,14 +379,14 @@ def admin_dashboard():
         <style>
             body { font-family: system-ui, sans-serif; background: #f4f6f9; margin: 0; padding-bottom: 30px; }
             .container { padding: 20px; }
-            .card { background: white; padding: 20px; border-radius: 8px; margin-top: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); border-top: 4px solid #0d47a1; display: none; }
-            .card.active { display: block; }
-            input, select, textarea, button { width: 100%; padding: 10px; margin-top: 6px; box-sizing: border-box; font-family: inherit; }
+            .card { background: white; padding: 20px; border-radius: 8px; margin-top: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); border-top: 4px solid #0d47a1; }
+            input, select, button { width: 100%; padding: 10px; margin-top: 6px; box-sizing: border-box; font-family: inherit; }
             button { background: #0d47a1; color: white; border: none; font-weight: bold; cursor: pointer; border-radius: 5px; }
             table { width: 100%; border-collapse: collapse; margin-top: 10px; }
             th, td { border: 1px solid #e0e0e0; padding: 9px; text-align: center; font-size: 13.5px; }
             th { background: #0d47a1; color: white; }
-            .alert-badge { background: #ffebee; color: #c62828; padding: 10px 15px; border-radius: 6px; border-right: 4px solid #c62828; margin-bottom: 10px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
+            .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; }
+            .modal-content { background: white; padding: 25px; border-radius: 8px; width: 400px; max-width: 90%; }
         </style>
     </head>
     <body>
@@ -434,22 +395,15 @@ def admin_dashboard():
         <div class="container">
             {% if msg %}
             <div style="background:#e8f5e9; color:#2e7d32; padding:12px; border-radius:6px; font-weight:bold; margin-bottom:15px; border-right:4px solid #2e7d32;">
-                💾 {{ msg }} (تم الحفظ التلقائي في ملف النظام المحمي بنجاح)
+                💾 {{ msg }}
             </div>
             {% endif %}
 
-            <div id="liveAlertsContainer">
-                <div class="alert-badge">
-                    <span>🔔 [تنبيه ذكي LAN]: الأستاذ "شمران الرشعيني" (شراء خدمات) لم يسجل بصمة الحضور الرسمية حتى الساعة 08:00 صباحاً!</span>
-                    <span style="font-size:12px; color:#555;">التاريخ: اليوم | اتصال LAN: متصل</span>
-                </div>
-            </div>
-
-            <div id="teachersListSec" class="card active">
-                <h3 style="color:#0d47a1; margin-top:0;">👨‍🏫 سجل الأساتذة والموظفين (مع خيارات الإضافة والحذف التلقائي)</h3>
+            <div class="card">
+                <h3 style="color:#0d47a1; margin-top:0;">👨‍🏫 سجل الأساتذة والموظفين (مع قفل الجهاز وأوقات الدوام)</h3>
                 
                 <div style="display:flex; gap:15px; margin-bottom:20px; flex-wrap:wrap;">
-                    <form method="POST" style="flex:1; background:#f0f4f8; padding:15px; border-radius:6px; margin:0;" onsubmit="return confirmAction('هل تريد توليد الحسابات من ملف الإكسل؟');">
+                    <form method="POST" style="flex:1; background:#f0f4f8; padding:15px; border-radius:6px; margin:0;">
                         <input type="hidden" name="action" value="create_auto_accounts">
                         <h4 style="margin-top:0; color:#0d47a1;">⚡ توليد جماعي من الشيتات</h4>
                         <button type="submit" style="background:#2e7d32;">توليد كل الحسابات والـ IDs</button>
@@ -457,7 +411,7 @@ def admin_dashboard():
 
                     <form method="POST" style="flex:1; background:#f0f4f8; padding:15px; border-radius:6px; margin:0;">
                         <input type="hidden" name="action" value="add_single_teacher">
-                        <h4 style="margin-top:0; color:#0d47a1;">➕ إضافة أستاذ جديد يدوياً وخلق يوزر</h4>
+                        <h4 style="margin-top:0; color:#0d47a1;">➕ إضافة أستاذ جديد يدوياً</h4>
                         <input type="text" name="teacher_name" placeholder="اسم الأستاذ الثلاثي" required style="margin-bottom:6px;">
                         <select name="category" required style="margin-bottom:6px; background:white;">
                             <option value="الملاك">الملاك</option>
@@ -465,165 +419,86 @@ def admin_dashboard():
                             <option value="متعاقدين">متعاقدين</option>
                         </select>
                         <input type="number" name="fingerprint_id" placeholder="رقم البصمة ID" required style="margin-bottom:6px;">
-                        <button type="submit" style="background:#0d47a1;">إضافة الأستاذ وتوليد الحساب</button>
+                        <input type="text" name="official_shift" placeholder="أوقات الدوام الرسمي (مثال: 07:50 - 1:30)" value="07:50 - 1:30" required style="margin-bottom:6px;">
+                        <button type="submit" style="background:#0d47a1;">إضافة الأستاذ</button>
                     </form>
                 </div>
 
                 <table>
-                    <tr><th>اسم الأستاذ / الموظف</th><th>التصنيف</th><th>اسم المستخدم</th><th>كلمة المرور</th><th>رقم البصمة (ID)</th><th>الدوام الرسمي</th><th>إدارة وحذف</th></tr>
+                    <tr><th>اسم الأستاذ</th><th>التصنيف</th><th>اليوزر</th><th>البصمة ID</th><th>أوقات الدوام الرسمي</th><th>حالة الجهاز (Device Lock)</th><th>إجراءات</th></tr>
                     {{ teachers_rows | safe }}
                 </table>
             </div>
 
-            <div id="deviceConfigSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">🖧 برمجة وضبط جهاز البصمة ومراقبة الـ LAN</h3>
-                <form method="POST">
-                    <input type="hidden" name="action" value="save_device_config">
-                    <label><b>عنوان آي بي جهاز البصمة (Device IP Address):</b></label>
-                    <input type="text" name="device_ip" value="192.168.1.201" required>
-                    <label style="margin-top:10px; display:block;"><b>منفذ الاتصال (Port):</b></label>
-                    <input type="text" name="device_port" value="4370" required>
-                    <button type="submit" style="margin-top:15px; background:#2e7d32;" onclick="markSaved()">💾 حفظ إعدادات الجهاز والمزامنة</button>
-                </form>
+            <!-- نافذة التعديل المنبثقة (Modal) -->
+            <div id="editModal" class="modal">
+                <div class="modal-content">
+                    <h3 style="color:#0d47a1; margin-top:0;">✏️ تعديل معلومات الأستاذ والدوام</h3>
+                    <form method="POST">
+                        <input type="hidden" name="action" value="edit_teacher">
+                        <input type="hidden" id="edit_teacher_key" name="teacher_key">
+                        <label><b>اسم الأستاذ:</b></label>
+                        <input type="text" id="edit_name" name="teacher_name" required>
+                        <label style="margin-top:8px; display:block;"><b>التصنيف:</b></label>
+                        <select id="edit_category" name="category" required style="background:white;">
+                            <option value="الملاك">الملاك</option>
+                            <option value="شراء الخدمات">شراء الخدمات</option>
+                            <option value="متعاقدين">متعاقدين</option>
+                        </select>
+                        <label style="margin-top:8px; display:block;"><b>رقم البصمة ID:</b></label>
+                        <input type="number" id="edit_f_id" name="fingerprint_id" required>
+                        <label style="margin-top:8px; display:block;"><b>أوقات الدوام الرسمي:</b></label>
+                        <input type="text" id="edit_shift" name="official_shift" required>
+                        <div style="margin-top:10px;">
+                            <label><input type="checkbox" name="reset_device" value="on"> إلغاء قفل الجهاز (ليتمكن من الدخول من جهاز جديد)</label>
+                        </div>
+                        <div style="display:flex; gap:10px; margin-top:15px;">
+                            <button type="submit" style="background:#2e7d32; flex:1;">حفظ التعديلات</button>
+                            <button type="button" onclick="closeEditModal()" style="background:#c62828; flex:1;">إلغاء</button>
+                        </div>
+                    </form>
+                </div>
             </div>
 
-            <div id="dailyAttendanceReportSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">📊 تقرير الدوام اليومي والغياب (حسب التاريخ ورابط الـ LAN)</h3>
-                <table>
-                    <tr><th>التاريخ</th><th>اسم الأستاذ</th><th>التصنيف</th><th>بصمة الحضور</th><th>بصمة الانصراف</th><th>الحالة والتقرير</th></tr>
-                    <tr><td>2026-10-28</td><td>محمد شمص</td><td>الملاك (07:50 - 1:30)</td><td style='color:#2e7d32; font-weight:bold;'>07:52 ص</td><td>-</td><td><span style='color:green;'>حاضر بانتظام</span></td></tr>
-                </table>
-            </div>
-
-            <div id="viewWeeklySchedule" class="card">
-                {{ directorate_htmls['weekly_schedule'] | safe }}
-            </div>
-
-            <div id="viewFingerprintIds" class="card">
-                {{ directorate_htmls['fingerprint_ids'] | safe }}
-            </div>
-
-            <div id="uploadDirectorateFilesSec" class="card">
+            <div class="card" style="margin-top:20px;">
                 <h3 style="color:#0d47a1; margin-top:0;">⚙️ رفع ملفات المديرية والبصمة (Excel)</h3>
-                <form method="POST" enctype="multipart/form-data" onsubmit="markSaved()">
+                <form method="POST" enctype="multipart/form-data">
                     <input type="hidden" name="action" value="upload_directorate_file">
                     <select name="file_key" required style="font-weight:bold; background:#e3f2fd; margin-bottom:10px;">
                         <option value="fingerprint_ids">🆔 ملف البصمة ID (الشيتات الثلاثة)</option>
                         <option value="weekly_schedule">📅 البرنامج الأسبوعي للمعهد والمواد</option>
-                        <option value="teachers_cards">📇 بطاقات الاساتذة</option>
-                        <option value="students_registered">📂 الطلاب المسجلون</option>
-                        <option value="executed_hours">⏱️ الساعات المنفذة للاساتذة</option>
                     </select>
-                    <input type="file" name="excel_file" accept=".xlsx, .xls" required onchange="hasUnsavedChanges=true;">
-                    <button type="submit" style="margin-top:15px; background:#2e7d32;">📥 رفع وتحليل وحفظ الملف في النظام المحمي</button>
+                    <input type="file" name="excel_file" accept=".xlsx, .xls" required>
+                    <button type="submit" style="margin-top:10px; background:#2e7d32;">📥 رفع وتحليل الملف</button>
                 </form>
             </div>
         </div>
 
         <script>
-            let hasUnsavedChanges = false;
-            function showSection(secId) {
-                if(hasUnsavedChanges && !confirm("تنبيه: لديك تعديلات لم يتم حفظها! هل تريد المتابعة؟")) return;
-                document.querySelectorAll('.card').forEach(el => el.classList.remove('active'));
-                let target = document.getElementById(secId);
-                if(target) target.classList.add('active');
+            function openEditModal(key, name, cat, fId, shift) {
+                document.getElementById('edit_teacher_key').value = key;
+                document.getElementById('edit_name').value = name;
+                document.getElementById('edit_category').value = cat;
+                document.getElementById('edit_f_id').value = fId;
+                document.getElementById('edit_shift').value = shift;
+                document.getElementById('edit_modal').style.display = 'flex'; // تم التصحيح ليتطابق مع الـ ID
+                document.getElementById('editModal').style.display = 'flex';
             }
-            function markSaved() { hasUnsavedChanges = false; }
-            function confirmAction(msg) { hasUnsavedChanges = false; return confirm(msg); }
+            function closeEditModal() {
+                document.getElementById('editModal').style.display = 'none';
+            }
         </script>
     </body>
     </html>
     '''
-    return render_template_string(admin_template, teachers_rows=teachers_rows, directorate_htmls=directorate_htmls, msg=msg)
+    return render_template_string(admin_template, teachers_rows=teachers_rows, msg=msg)
 
-@app.route('/teacher', methods=['GET', 'POST'])
+@app.route('/teacher', methods=['GET'])
 def teacher_dashboard():
     if session.get('role') != 'teacher': return redirect(url_for('login'))
-    
     username = session.get('username')
     user_data = teachers_db.get(username, {})
-    t_name = user_data.get('name', '').strip()
-    clean_t = clean_name(t_name)
-    cat = user_data.get('category', 'متعاقدين')
-    f_id = user_data.get('fingerprint_id', 'غير مرتبط')
-    shift = user_data.get('official_shift', 'حسب الحصص')
-
-    parsed_schedule = directorate_excel_tables.get('weekly_schedule', {}).get('parsed_schedule', {})
-    teacher_schedule_items = parsed_schedule.get(clean_t, [])
-    
-    schedule_rows = ""
-    if teacher_schedule_items:
-        for item in teacher_schedule_items:
-            schedule_rows += f"""
-            <tr>
-                <td><b>{item['day']}</b></td>
-                <td><span style='background:#e3f2fd; color:#0d47a1; padding:3px 8px; border-radius:4px;'>{item['class_name']}</span></td>
-                <td><b style='color:#0d47a1; font-size:14px;'>{item['subject']}</b></td>
-                <td><code style='color:#2e7d32; font-weight:bold;'>{item['period']}</code></td>
-                <td><code>{item['duration']}</code></td>
-            </tr>
-            """
-    
-    fingerprint_history_html = f"""
-    <div style="background:white; padding:20px; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.06); border-top:4px solid #0d47a1; margin-top:20px;">
-        <h3 style="color:#0d47a1; margin-top:0;">📊 سجل بصمات الحضور والدوام السابق (LAN Sync):</h3>
-        <p style="font-size:13px; color:#555;">هنا يمكنك الاطلاع على حركات بصماتك المسجلة عبر جهاز البصمة في المعهد للأيام السابقة:</p>
-        <table>
-            <tr><th>التاريخ</th><th>اليوم</th><th>بصمة الحضور</th><th>بصمة الانصراف</th><th>الحالة والتقييم</th></tr>
-            <tr>
-                <td>2026-10-27</td>
-                <td>الإثنين</td>
-                <td style="color:#2e7d32; font-weight:bold;">07:51 ص</td>
-                <td style="color:#c62828; font-weight:bold;">01:32 ظ</td>
-                <td><span style="background:#e8f5e9; color:#2e7d32; padding:3px 8px; border-radius:4px; font-weight:bold;">حضور منتظم</span></td>
-            </tr>
-        </table>
-    </div>
-    """
-
-    schedule_html = f"""
-    <div style="background:white; padding:20px; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.06); border-top:4px solid #2e7d32;">
-        <h3 style="color:#2e7d32; margin-top:0;">📅 برنامجي الأسبوعي اليومي (المواد، رقم الحصة، والمدة):</h3>
-        <table>
-            <tr><th>اليوم</th><th>الصف الدراسي</th><th>المادة الدراسية</th><th>رقم الحصة</th><th>مدة الحصة</th></tr>
-            {schedule_rows if schedule_rows else '<tr><td colspan="5" style="padding:20px; color:#666;">لا توجد حصص مسجلة باسمك في جدول المعهد الحالي</td></tr>'}
-        </table>
-    </div>
-    """
-
-    teacher_template = """
-    <!DOCTYPE html>
-    <html lang="ar" dir="rtl">
-    <head>
-        <meta charset="UTF-8">
-        <title>الجمهورية اللبنانية 🌲 - واجهة الأستاذ</title>
-        <style>
-            body { font-family: system-ui, sans-serif; background: #f4f6f9; margin: 0; padding-bottom: 30px; }
-            .header { background: #0d47a1; color: white; padding: 15px 25px; display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #1565c0; }
-            .container { padding: 20px; max-width: 1000px; margin: auto; }
-            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-            th, td { border: 1px solid #e0e0e0; padding: 10px; text-align: center; font-size: 13.5px; }
-            th { background: #0d47a1; color: white; }
-        </style>
-    </head>
-    <body>
-        <div class="header">
-            <div>
-                <h3 style="margin:0;">الجمهورية اللبنانية 🌲 - معهد الهرمل الفني</h3>
-                <div style="font-size:13px; color:#bbdefb; margin-top:4px;">الأستاذ: <b>{{ t_name }}</b> | التصنيف: <b>{{ cat }}</b> | رقم البصمة (ID): <b>{{ f_id }}</b> | الدوام الرسمي: <b>{{ shift }}</b></div>
-            </div>
-            <a href="/logout" style="color:#ffcdd2; background:#c62828; padding:8px 15px; border-radius:4px; text-decoration:none; font-size:13px; font-weight:bold;">تسجيل الخروج</a>
-        </div>
-
-        <div class="container">
-            {{ schedule_html | safe }}
-            {{ fingerprint_history_html | safe }}
-        </div>
-        <div style="text-align:center; color:#777; font-size:12px; margin-top:30px;">نظام إدارة معهد الهرمل الفني © 2026 - إشراف وتصميم: مدير المعهد (محمد حسين شمص)</div>
-    </body>
-    </html>
-    """
-    return render_template_string(teacher_template, t_name=t_name, cat=cat, f_id=f_id, shift=shift, schedule_html=schedule_html, fingerprint_history_html=fingerprint_history_html)
+    return f"<h1>أهلاً بك يا أستاذ {user_data.get('name')}</h1><p>أوقات دوامك الرسمي: {user_data.get('official_shift')}</p><a href='/logout'>خروج</a>"
 
 @app.route('/logout')
 def logout():
