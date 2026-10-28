@@ -19,6 +19,7 @@ ALLOWED_EXTENSIONS = {'xlsx', 'xls'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+# المتغيرات الأساسية
 teachers_db = {}
 grades_db = {}            
 attendance_db = {}        
@@ -67,26 +68,29 @@ def load_from_disk():
         try:
             with open(DB_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                teachers_db = data.get('teachers_db', {})
-                grades_db = data.get('grades_db', {})
-                attendance_db = data.get('attendance_db', {})
-                classes_students = data.get('classes_students', {})
-                admin_replies = data.get('admin_replies', [])
-                admin_credentials = data.get('admin_credentials', {'username': 'admin', 'password': '123456'})
-                teacher_fingerprint_log = data.get('teacher_fingerprint_log', {})
-                directorate_excel_tables = data.get('directorate_excel_tables', directorate_excel_tables)
-                admin_alerts = data.get('admin_alerts', [])
+                teachers_db.clear()
+                teachers_db.update(data.get('teachers_db', {}))
+                
+                grades_db.clear()
+                grades_db.update(data.get('grades_db', {}))
+                
+                attendance_db.clear()
+                attendance_db.update(data.get('attendance_db', {}))
+                
+                classes_students.clear()
+                classes_students.update(data.get('classes_students', {}))
+                
+                directorate_excel_tables.clear()
+                directorate_excel_tables.update(data.get('directorate_excel_tables', directorate_excel_tables))
+                
+                print("تم استرجاع البيانات بنجاح من الملف المحمي!")
                 return True
         except Exception as e:
             print(f"Error loading database file: {e}")
     return False
 
-if not load_from_disk():
-    classes_students = {
-        "سنة ثالثة عناية تمريضية": ["علي أحمد شمص", "حسن محمد زعيتر", "ميرا شمص", "سيلا شمص"],
-        "سنة ثانية معلوماتية": ["محمد حسين أمهز", "سارة يوسف دندش"]
-    }
-    save_to_disk()
+# استدعاء تحميل البيانات فور إقلاع البرنامج لضمان عدم ضياعها أبداً
+load_from_disk()
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -140,7 +144,7 @@ def parse_fingerprint_ids(xls_file):
                             if name_candidate and name_candidate != 'nan' and not name_candidate.isdigit():
                                 clean_t = clean_name(name_candidate)
                                 id_map[clean_t] = int(val)
-                                categories[clean_t] = sheet_name # الملاك، شراء الخدمات، متعاقدين
+                                categories[clean_t] = sheet_name
                                 break
     except Exception as e:
         print(f"Error parsing fingerprint IDs: {e}")
@@ -187,7 +191,6 @@ HEADER_VTE_HTML = '''
         <button class="dropbtn">الإدارة والإعدادات ▾</button>
         <div class="dropdown-content">
             <a href="javascript:void(0)" onclick="showSection('uploadDirectorateFilesSec')">⚙️ رفع ملفات المديرية والبصمة (Excel)</a>
-            <a href="javascript:void(0)" onclick="showSection('changePassSec')">🔑 تغيير كلمة السر الإدارية</a>
         </div>
     </div>
 </div>
@@ -561,7 +564,6 @@ def teacher_dashboard():
             </tr>
             """
     
-    # سجل البصمات والدوام السابق الجملي والمنظم للأستاذ
     fingerprint_history_html = f"""
     <div style="background:white; padding:20px; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.06); border-top:4px solid #0d47a1; margin-top:20px;">
         <h3 style="color:#0d47a1; margin-top:0;">📊 سجل بصمات الحضور والدوام السابق (LAN Sync):</h3>
@@ -574,13 +576,6 @@ def teacher_dashboard():
                 <td style="color:#2e7d32; font-weight:bold;">07:51 ص</td>
                 <td style="color:#c62828; font-weight:bold;">01:32 ظ</td>
                 <td><span style="background:#e8f5e9; color:#2e7d32; padding:3px 8px; border-radius:4px; font-weight:bold;">حضور منتظم</span></td>
-            </tr>
-            <tr>
-                <td>2026-10-26</td>
-                <td>الأحد</td>
-                <td style="color:#2e7d32; font-weight:bold;">07:48 ص</td>
-                <td style="color:#c62828; font-weight:bold;">01:30 ظ</td>
-                <td><span style="background:#e8f5e9; color:#2e7d32; padding:3px 8px; border-radius:4px; font-weight:bold;">حضور مبكر ومنتظم</span></td>
             </tr>
         </table>
     </div>
