@@ -67,16 +67,21 @@ def load_from_disk():
         try:
             with open(DB_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                teachers_db.clear()
-                teachers_db.update(data.get('teachers_db', {}))
-                grades_db.clear()
-                grades_db.update(data.get('grades_db', {}))
-                attendance_db.clear()
-                attendance_db.update(data.get('attendance_db', {}))
-                classes_students.clear()
-                classes_students.update(data.get('classes_students', {}))
-                directorate_excel_tables.clear()
-                directorate_excel_tables.update(data.get('directorate_excel_tables', directorate_excel_tables))
+                if 'teachers_db' in data:
+                    teachers_db.clear()
+                    teachers_db.update(data['teachers_db'])
+                if 'grades_db' in data:
+                    grades_db.clear()
+                    grades_db.update(data['grades_db'])
+                if 'attendance_db' in data:
+                    attendance_db.clear()
+                    attendance_db.update(data['attendance_db'])
+                if 'classes_students' in data:
+                    classes_students.clear()
+                    classes_students.update(data['classes_students'])
+                if 'directorate_excel_tables' in data:
+                    directorate_excel_tables.clear()
+                    directorate_excel_tables.update(data['directorate_excel_tables'])
                 return True
         except Exception as e:
             print(f"Error loading database file: {e}")
@@ -191,7 +196,7 @@ HEADER_VTE_HTML = '''
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     error = ''
-    client_ip = request.remote_addr # الحصول على عنوان آي بي الجهاز المتصل
+    client_ip = request.remote_addr
     if request.method == 'POST':
         username = request.form.get('username', '').strip().lower()
         password = request.form.get('password', '').strip()
@@ -204,7 +209,6 @@ def login():
             t_data = teachers_db[username]
             bound_device = t_data.get('bound_device', '')
             
-            # قفل الجهاز: إذا كان الأستاذ مرتبطاً بجهاز معين ولم يتم تسجيل جهازه مسبقاً، نربطه أو نتحقق منه
             if not bound_device:
                 teachers_db[username]['bound_device'] = client_ip
                 save_to_disk()
@@ -333,7 +337,7 @@ def admin_dashboard():
                 teachers_db[t_key]['fingerprint_id'] = int(request.form.get('fingerprint_id', 0))
                 teachers_db[t_key]['official_shift'] = request.form.get('official_shift', '').strip()
                 if request.form.get('reset_device') == 'on':
-                    teachers_db[t_key]['bound_device'] = '' # إبطال قفل الجهاز ليتمكن من الدخول من جهاز جديد
+                    teachers_db[t_key]['bound_device'] = ''
                 save_to_disk()
                 msg = f"تم تعديل بيانات الأستاذ بنجاح!"
 
@@ -360,11 +364,11 @@ def admin_dashboard():
             <td style='font-size:12px; color:#333; font-weight:bold;'>{shift}</td>
             <td>{device_status}</td>
             <td>
-                <button type="button" onclick="openEditModal('{u}', '{t['name']}', '{cat}', '{t.get('fingerprint_id')}', '{shift}')" style="background:#1976d2; padding:5px 10px; font-size:12px; width:auto; margin-bottom:4px;">✏️ تعديل</button>
+                <button type="button" onclick="openEditModal('{u}', '{t['name']}', '{cat}', '{t.get('fingerprint_id')}', '{shift}')" style="background:#1976d2; padding:5px 10px; font-size:12px; width:auto; margin-bottom:4px; cursor:pointer;">✏️ تعديل</button>
                 <form method="POST" onsubmit="return confirm('هل أنت متأكد من حذف هذا الأستاذ؟');" style="margin:0; display:inline;">
                     <input type="hidden" name="action" value="delete_teacher">
                     <input type="hidden" name="teacher_key" value="{u}">
-                    <button type="submit" style="background:#c62828; padding:5px 10px; font-size:12px; width:auto;">🗑️ حذف</button>
+                    <button type="submit" style="background:#c62828; padding:5px 10px; font-size:12px; width:auto; cursor:pointer;">🗑️ حذف</button>
                 </form>
             </td>
         </tr>
@@ -386,7 +390,7 @@ def admin_dashboard():
             th, td { border: 1px solid #e0e0e0; padding: 9px; text-align: center; font-size: 13.5px; }
             th { background: #0d47a1; color: white; }
             .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; }
-            .modal-content { background: white; padding: 25px; border-radius: 8px; width: 400px; max-width: 90%; }
+            .modal-content { background: white; padding: 25px; border-radius: 8px; width: 400px; max-width: 90%; box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
         </style>
     </head>
     <body>
@@ -481,7 +485,6 @@ def admin_dashboard():
                 document.getElementById('edit_category').value = cat;
                 document.getElementById('edit_f_id').value = fId;
                 document.getElementById('edit_shift').value = shift;
-                document.getElementById('edit_modal').style.display = 'flex'; // تم التصحيح ليتطابق مع الـ ID
                 document.getElementById('editModal').style.display = 'flex';
             }
             function closeEditModal() {
