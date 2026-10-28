@@ -11,13 +11,14 @@ from flask import Flask, render_template_string, request, redirect, url_for, ses
 app = Flask(__name__)
 app.secret_key = 'hermel_tech_school_shams_secret_key_2026'
 
-UPLOAD_FOLDER = 'uploads'
+# استخدام مجلد /tmp المؤقت على Vercel لمنع أخطاء القراءة والكتابة
+DB_FILE = os.path.join('/tmp', 'database.json')
+BACKUP_FILE = os.path.join('/tmp', 'database_backup.json')
+
+UPLOAD_FOLDER = os.path.join('/tmp', 'uploads')
 ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'xlsx', 'xls'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
-DB_FILE = 'database.json'
-BACKUP_FILE = 'database_backup.json'
 
 TRAINING_LOCATIONS = {
     "مستشفى الهرمل الحكومي": {"lat": 34.381283, "lng": 36.424456, "radius_meters": 300},
