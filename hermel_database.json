@@ -1,2 +1,1 @@
-DB_FILE = os.path.join('/tmp', 'database.json')
-BACKUP_FILE = os.path.join('/tmp', 'database_backup.json')
+{}
