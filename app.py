@@ -10,7 +10,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 
 app = Flask(__name__)
-app.secret_key = 'hermel_tech_school_shams_secret_key_2026'
+app.secret_key = 'hermel_tech_enterprise_shams_2026_secure_key'
 
 UPLOAD_FOLDER = 'uploads'
 ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'xlsx', 'xls'}
@@ -123,11 +123,8 @@ classes_students = load_from_disk('classes_students', {
     "سنة ثالثة عناية تمريضية": ["علي أحمد شمص", "حسن محمد زعيتر", "ميرا شمص", "سيلا شمص"],
     "سنة ثانية معلوماتية": ["محمد حسين أمهز", "سارة يوسف دندش"]
 })
-academic_years_db = load_from_disk('academic_years_db', ["2025-2026", "2026-2027", "2027-2028", "2028-2029"])
 current_academic_year = load_from_disk('current_academic_year', "2026-2027")
-students_db = load_from_disk('students_db', [])
 field_sessions = load_from_disk('field_sessions', [])
-teacher_absences_log = load_from_disk('teacher_absences_log', [])
 directorate_excel_tables = load_from_disk('directorate_excel_tables', {
     "students_registered": {"title": "الطلاب المسجلون", "columns": [], "data": []},
     "teachers_cards": {"title": "بطاقات الاساتذة", "columns": [], "data": []},
@@ -146,11 +143,8 @@ def save_all_data():
         save_to_disk('admin_replies', admin_replies)
         save_to_disk('admin_credentials', admin_credentials)
         save_to_disk('classes_students', classes_students)
-        save_to_disk('academic_years_db', academic_years_db)
         save_to_disk('current_academic_year', current_academic_year)
-        save_to_disk('students_db', students_db)
         save_to_disk('field_sessions', field_sessions)
-        save_to_disk('teacher_absences_log', teacher_absences_log)
         save_to_disk('directorate_excel_tables', directorate_excel_tables)
     except Exception as e:
         print(f"Error in save_all_data: {e}")
@@ -218,71 +212,88 @@ def handle_exception(e):
     </div>
     """, 500
 
+SHARED_HEAD = '''
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { font-family: system-ui, -apple-system, sans-serif; background-color: #f8fafc; color: #1e293b; }
+        .navbar-custom { background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%); box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+        .card-custom { border: none; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03); background: #ffffff; transition: transform 0.2s; margin-bottom: 20px; display: none; }
+        .card-custom.active { display: block; animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        .btn-primary-custom { background-color: #1e3a8a; border-color: #1e3a8a; color: white; font-weight: 600; }
+        .btn-primary-custom:hover { background-color: #1e40af; border-color: #1e40af; color: white; }
+        .table-custom th { background-color: #f1f5f9; color: #334155; font-weight: 600; text-align: center; }
+        .table-custom td { text-align: center; vertical-align: middle; }
+        .dropdown-menu { border-radius: 10px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); border: none; }
+        .dropdown-item { font-weight: 500; padding: 8px 16px; }
+        .dropdown-item:hover { background-color: #eff6ff; color: #1e3a8a; }
+    </style>
+'''
+
 HEADER_VTE_HTML = '''
-<div style="background:#0d47a1; color:white; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; border-bottom:3px solid #1565c0;">
-    <div style="display:flex; align-items:center; gap:12px;">
-        <img src="https://cdn-icons-png.flaticon.com/512/3135/3135755.png" width="38" height="38" style="background:white; border-radius:50%; padding:2px;">
-        <div>
-            <div style="font-weight:bold; font-size:18px;">الجمهورية اللبنانية 🌲 - معهد الهرمل الفني</div>
-            <div style="font-size:12px; color:#bbdefb;">نظام توثيق الحضور والإنصراف - تصميم وإشراف: مدير المعهد</div>
+<nav class="navbar navbar-expand-lg navbar-dark navbar-custom px-4 py-3">
+    <div class="container-fluid">
+        <a class="navbar-brand d-flex align-items-center gap-3" href="/admin">
+            <div class="bg-white p-2 rounded-circle text-primary shadow-sm">
+                <i class="fa-solid fa-graduation-cap fa-lg"></i>
+            </div>
+            <div>
+                <div class="fw-bold fs-5">الجمهورية اللبنانية 🌲 - معهد الهرمل الفني</div>
+                <div class="small text-info">نظام الإدارة الرقمية والذكية - إشراف وإدارة المدير</div>
+            </div>
+        </a>
+        <div class="d-flex align-items-center gap-3">
+            <a href="/logout" class="btn btn-danger btn-sm px-3 fw-bold shadow-sm"><i class="fa-solid fa-right-from-bracket ms-1"></i> خروج</a>
         </div>
     </div>
-    <div>
-        <a href="/logout" style="color:#ffcdd2; text-decoration:none; font-weight:bold; font-size:13px; background:#c62828; padding:6px 12px; border-radius:4px;">تسجيل الخروج</a>
+</nav>
+
+<div class="bg-primary bg-gradient px-4 py-2 shadow-sm">
+    <div class="container-fluid d-flex flex-wrap gap-2 align-items-center justify-content-start">
+        <a href="/admin" class="btn btn-light btn-sm fw-bold text-primary"><i class="fa-solid fa-house ms-1"></i> الرئيسية</a>
+        
+        <div class="dropdown">
+            <button class="btn btn-outline-light btn-sm dropdown-toggle fw-bold" data-bs-toggle="dropdown"><i class="fa-solid fa-user-graduate ms-1"></i> الطلاب</button>
+            <ul class="dropdown-menu">
+                <li><a class="dropdown-item" href="javascript:void(0)" onclick="showSection('studentAttendanceSec')"><i class="fa-solid fa-clipboard-user text-primary ms-2"></i> حضور وغياب الطلاب</a></li>
+                <li><a class="dropdown-item" href="javascript:void(0)" onclick="showSection('studentGradesSec')"><i class="fa-solid fa-star text-warning ms-2"></i> علامات ونتائج الطلاب</a></li>
+                <li><a class="dropdown-item" href="javascript:void(0)" onclick="showSection('viewRegisteredStudents')"><i class="fa-solid fa-folder-open text-success ms-2"></i> جدول الطلاب المسجلون</a></li>
+            </ul>
+        </div>
+
+        <div class="dropdown">
+            <button class="btn btn-outline-light btn-sm dropdown-toggle fw-bold" data-bs-toggle="dropdown"><i class="fa-solid fa-chalkboard-user ms-1"></i> الأساتذة والدوام</button>
+            <ul class="dropdown-menu">
+                <li><a class="dropdown-item" href="javascript:void(0)" onclick="showSection('attendanceReportSec')"><i class="fa-solid fa-clock-rotate-left text-primary ms-2"></i> كشف الحضور والغياب (20 حصة)</a></li>
+                <li><a class="dropdown-item" href="javascript:void(0)" onclick="showSection('teachersListSec')"><i class="fa-solid fa-users text-success ms-2"></i> سجل الأساتذة وعقود الساعات</a></li>
+                <li><a class="dropdown-item" href="javascript:void(0)" onclick="showSection('viewFingerprintIds')"><i class="fa-solid fa-fingerprint text-danger ms-2"></i> أرقام البصمة ID</a></li>
+                <li><a class="dropdown-item" href="javascript:void(0)" onclick="showSection('viewWeeklySchedule')"><i class="fa-solid fa-calendar-days text-info ms-2"></i> البرنامج الأسبوعي والمواد</a></li>
+                <li><a class="dropdown-item" href="javascript:void(0)" onclick="showSection('viewExecutedHours')"><i class="fa-solid fa-chart-line text-warning ms-2"></i> الساعات المنفذة شهرياً</a></li>
+            </ul>
+        </div>
+
+        <div class="dropdown">
+            <button class="btn btn-outline-light btn-sm dropdown-toggle fw-bold" data-bs-toggle="dropdown"><i class="fa-solid fa-map-location-dot ms-1"></i> التدريب الميداني GPS</button>
+            <ul class="dropdown-menu">
+                <li><a class="dropdown-item" href="javascript:void(0)" onclick="showSection('fieldSessionSec')"><i class="fa-solid fa-hospital text-danger ms-2"></i> إدارة الجلسات الميدانية</a></li>
+            </ul>
+        </div>
+
+        <div class="dropdown">
+            <button class="btn btn-outline-light btn-sm dropdown-toggle fw-bold" data-bs-toggle="dropdown"><i class="fa-solid fa-gears ms-1"></i> الإعدادات والملفات</button>
+            <ul class="dropdown-menu">
+                <li><a class="dropdown-item" href="javascript:void(0)" onclick="showSection('uploadDirectorateFilesSec')"><i class="fa-solid fa-file-excel text-success ms-2"></i> رفع ملفات المديرية (Excel)</a></li>
+                <li><a class="dropdown-item" href="javascript:void(0)" onclick="showSection('deviceBindingSec')"><i class="fa-solid fa-mobile-screen text-primary ms-2"></i> إدارة أجهزة الأساتذة (فك الربط)</a></li>
+                <li><a class="dropdown-item" href="javascript:void(0)" onclick="showSection('sendNotifSec')"><i class="fa-solid fa-bullhorn text-warning ms-2"></i> إرسال تعميم إداري</a></li>
+                <li><a class="dropdown-item" href="javascript:void(0)" onclick="showSection('teacherRepliesSec')"><i class="fa-solid fa-envelope-open-text text-info ms-2"></i> الأعذار والرسائل الواردة</a></li>
+                <li><a class="dropdown-item" href="javascript:void(0)" onclick="showSection('changePassSec')"><i class="fa-solid fa-key text-danger ms-2"></i> تغيير كلمة السر الإدارية</a></li>
+            </ul>
+        </div>
     </div>
 </div>
-
-<div style="background:#1565c0; padding:0 20px; display:flex; gap:5px; border-bottom:1px solid #1976d2; flex-wrap:wrap;">
-    <a href="/admin" style="color:white; text-decoration:none; padding:12px 16px; font-weight:bold; font-size:14px; background:#0d47a1;">🏠 الرئيسية</a>
-    
-    <div class="dropdown">
-        <button class="dropbtn">الطلاب ▾</button>
-        <div class="dropdown-content">
-            <a href="javascript:void(0)" onclick="showSection('studentAttendanceSec')">📋 حضور وغياب الطلاب</a>
-            <a href="javascript:void(0)" onclick="showSection('studentGradesSec')">📝 علامات ونتائج الطلاب</a>
-            <a href="javascript:void(0)" onclick="showSection('viewRegisteredStudents')">📂 جدول الطلاب المسجلون</a>
-        </div>
-    </div>
-
-    <div class="dropdown">
-        <button class="dropbtn">الأساتذة والدوام (بصمة) ▾</button>
-        <div class="dropdown-content">
-            <a href="javascript:void(0)" onclick="showSection('attendanceReportSec')">⏱️ كشف الحضور والغياب (تاريخ التغيب و 20 حصة)</a>
-            <a href="javascript:void(0)" onclick="showSection('teachersListSec')">👨‍🏫 سجل الأساتذة وعقود الساعات</a>
-            <a href="javascript:void(0)" onclick="showSection('viewFingerprintIds')">🆔 أقسام البصمة (ملاك، متعاقدين، خدمات)</a>
-            <a href="javascript:void(0)" onclick="showSection('viewWeeklySchedule')">📅 البرنامج الأسبوعي والأساتذة والمواد</a>
-            <a href="javascript:void(0)" onclick="showSection('viewExecutedHours')">⏱️ الساعات المنفذة شهرياً (نظام المديرية)</a>
-        </div>
-    </div>
-
-    <div class="dropdown">
-        <button class="dropbtn">التدريب الميداني والـ GPS ▾</button>
-        <div class="dropdown-content">
-            <a href="javascript:void(0)" onclick="showSection('fieldSessionSec')">🏥 إضافة وإدارة الجلسات الميدانية</a>
-        </div>
-    </div>
-
-    <div class="dropdown">
-        <button class="dropbtn">إعدادات وإدارة ▾</button>
-        <div class="dropdown-content">
-            <a href="javascript:void(0)" onclick="showSection('uploadDirectorateFilesSec')">⚙️ رفع ملفات المديرية والبصمة والساعات (Excel)</a>
-            <a href="javascript:void(0)" onclick="showSection('deviceBindingSec')">📱 إدارة أجهزة الأساتذة (فك الربط)</a>
-            <a href="javascript:void(0)" onclick="showSection('sendNotifSec')">📢 إرسال تعميم / تنبيه</a>
-            <a href="javascript:void(0)" onclick="showSection('teacherRepliesSec')">📩 الرسائل والأعذار الواردة</a>
-            <a href="javascript:void(0)" onclick="showSection('changePassSec')">🔑 تغيير كلمة السر الإدارية</a>
-        </div>
-    </div>
-</div>
-
-<style>
-    .dropdown { position: relative; display: inline-block; }
-    .dropbtn { background-color: #1565c0; color: white; padding: 12px 16px; font-size: 14px; border: none; cursor: pointer; font-weight: bold; font-family: inherit; }
-    .dropdown:hover .dropbtn { background-color: #0d47a1; }
-    .dropdown-content { display: none; position: absolute; background-color: #ffffff; min-width: 280px; box-shadow: 0px 8px 16px rgba(0,0,0,0.2); z-index: 100; border-radius: 0 0 6px 6px; }
-    .dropdown-content a { color: #333; padding: 10px 15px; text-decoration: none; display: block; font-size: 13.5px; border-bottom: 1px solid #f0f0f0; }
-    .dropdown-content a:hover { background-color: #e3f2fd; color: #0d47a1; font-weight: bold; }
-    .dropdown:hover .dropdown-content { display: block; }
-</style>
 '''
 
 @app.route('/', methods=['GET', 'POST'])
@@ -319,31 +330,45 @@ login_template = '''
     <!DOCTYPE html>
     <html lang="ar" dir="rtl">
     <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>الجمهورية اللبنانية 🌲 - معهد الهرمل الفني</title>
+        {{ shared_head | safe }}
+        <title>تسجيل الدخول - معهد الهرمل الفني</title>
         <style>
-            body { font-family: system-ui, sans-serif; background: #e3f2fd; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; flex-direction: column; }
-            .card { background: white; padding: 35px 25px; border-radius: 12px; width: 90%; max-width: 380px; text-align: center; box-shadow: 0 8px 20px rgba(13,71,161,0.15); border-top: 5px solid #0d47a1; }
-            h2 { color: #0d47a1; margin-bottom: 5px; font-size: 20px; }
-            input { width: 100%; padding: 12px; margin: 8px 0; border: 1.5px solid #bbdefb; border-radius: 6px; box-sizing: border-box; text-align: right; font-size: 14px; }
-            button { width: 100%; padding: 12px; background: #0d47a1; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; margin-top: 10px; font-size: 15px; }
+            body { background: linear-gradient(135deg, #1e3a8a 0%, #0f172a 100%); height: 100vh; display: flex; align-items: center; justify-content: center; }
+            .login-card { background: white; border-radius: 16px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.2); width: 100%; max-width: 420px; padding: 40px; border-top: 6px solid #1e3a8a; }
         </style>
     </head>
     <body>
-        <div class="card">
-            <img src="https://cdn-icons-png.flaticon.com/512/3135/3135755.png" width="60" style="margin-bottom:5px;">
-            <div style="font-size:13px; color:#555; font-weight:bold;">الجمهورية اللبنانية 🌲</div>
-            <h2>معهد الهرمل الفني</h2>
-            <small style="color:#0d47a1; display:block; margin-bottom:15px;">نظام توثيق الحضور والإنصراف</small>
+        <div class="login-card text-center">
+            <div class="bg-primary bg-opacity-10 p-3 rounded-circle d-inline-block text-primary mb-3 shadow-sm">
+                <i class="fa-solid fa-graduation-cap fa-2x"></i>
+            </div>
+            <div class="small fw-bold text-muted mb-1">الجمهورية اللبنانية 🌲</div>
+            <h3 class="fw-bold text-dark mb-2">معهد الهرمل الفني</h3>
+            <p class="text-muted small mb-4">نظام الحضور والإنصراف الذكي</p>
             <form method="POST">
-                <input type="text" name="username" placeholder="اسم المستخدم" required>
-                <input type="password" name="password" placeholder="كلمة المرور" required>
-                <button type="submit">دخول النظام</button>
+                <div class="mb-3 text-start">
+                    <label class="form-label small fw-bold text-secondary">اسم المستخدم</label>
+                    <div class="input-group">
+                        <span class="input-group-text bg-light"><i class="fa-solid fa-user text-muted"></i></span>
+                        <input type="text" name="username" class="form-control" placeholder="أدخل اسم المستخدم" required>
+                    </div>
+                </div>
+                <div class="mb-4 text-start">
+                    <label class="form-label small fw-bold text-secondary">كلمة المرور</label>
+                    <div class="input-group">
+                        <span class="input-group-text bg-light"><i class="fa-solid fa-lock text-muted"></i></span>
+                        <input type="password" name="password" class="form-control" placeholder="أدخل كلمة المرور" required>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary-custom w-100 py-2 shadow-sm"><i class="fa-solid fa-right-to-bracket ms-2"></i> تسجيل الدخول</button>
             </form>
-            <div style="color:#d32f2f; margin-top:12px; font-weight:bold; font-size:13px;">{{ error }}</div>
+            {% if error %}
+            <div class="alert alert-danger mt-3 py-2 small fw-bold shadow-sm" role="alert">
+                <i class="fa-solid fa-triangle-exclamation ms-1"></i> {{ error }}
+            </div>
+            {% endif %}
+            <div class="mt-4 text-muted small border-top pt-3">تصميم وإشراف: مدير المعهد (محمد حسين شمص)</div>
         </div>
-        <div style="margin-top: 20px; color: #5c6bc0; font-size: 12px; text-align:center;">إشراف وتصميم: مدير المعهد (محمد حسين شمص)</div>
     </body>
     </html>
 '''
@@ -561,8 +586,8 @@ def admin_dashboard():
                 save_all_data()
                 msg = "تم تغيير كلمة مرور الإدارة بنجاح!"
 
-    attendance_rows = "".join([f"<tr><td><b>{k}</b></td><td style='color:#c62828;'>متغيبون: {v.get('absent', [])}</td></tr>" for k, v in attendance_db.items()])
-    grades_rows = "".join([f"<tr><td><b>{k}</b></td><td><b style='color:#0d47a1;'>{v} / 20</b></td></tr>" for k, v in grades_db.items()]) if grades_db else ""
+    attendance_rows = "".join([f"<tr><td><b>{k}</b></td><td class='text-danger fw-bold'>متغيبون: {v.get('absent', [])}</td></tr>" for k, v in attendance_db.items()])
+    grades_rows = "".join([f"<tr><td><b>{k}</b></td><td><span class='badge bg-primary fs-6'>{v} / 20</span></td></tr>" for k, v in grades_db.items()]) if isinstance(grades_db, dict) and grades_db else ""
     
     executed_hours_table_html = ""
     monthly_data_map = directorate_excel_tables.get('executed_hours', {}).get('monthly_hours', {})
@@ -573,59 +598,58 @@ def admin_dashboard():
         for t_name, m_dict in monthly_data_map.items():
             m_tds = "".join([f"<td>{m_dict.get(m, 0):.0f}</td>" for m in MONTH_COLUMNS])
             total_exec = sum(m_dict.values())
-            m_rows += f"<tr><td style='text-align:right; font-weight:bold;'>{t_name}</td>{m_tds}<td style='background:#e3f2fd;'><b style='color:#0d47a1;'>{total_exec:.0f}</b></td></tr>"
+            m_rows += f"<tr><td class='text-start fw-bold'>{t_name}</td>{m_tds}<td class='table-active'><span class='badge bg-primary'>{total_exec:.0f}</span></td></tr>"
         
         executed_hours_table_html = f"""
-        <div style="overflow-x:auto;">
-            <table>
-                <tr>
-                    <th style="min-width:180px;">الاسم الثلاثي</th>
-                    {m_headers}
-                    <th>المجموع المنفذ</th>
-                </tr>
-                {m_rows}
+        <div class="table-responsive">
+            <table class="table table-bordered table-hover table-custom">
+                <thead><tr><th style="min-width:180px;">الاسم الثلاثي</th>{m_headers}<th>المجموع المنفذ</th></tr></thead>
+                <tbody>{m_rows}</tbody>
             </table>
         </div>
         """
     else:
-        executed_hours_table_html = "<p style='color:#666;'>لم يتم رفع ملف الساعات المنفذة بعد.</p>"
+        executed_hours_table_html = "<div class='alert alert-light border text-muted text-center py-3'>لم يتم رفع ملف الساعات المنفذة بعد.</div>"
 
     teachers_rows = ""
     if teachers_db:
         for u, t in teachers_db.items():
-            dev_stat = "<span style='color:#2e7d32; font-weight:bold;'>مرتبط برقم هاتف</span>" if t.get('device_id') else "<span style='color:#e65100;'>في انتظار تسجيل الهاتف</span>"
+            dev_stat = "<span class='badge bg-success'><i class='fa-solid fa-mobile-screen ms-1'></i> مرتبط</span>" if t.get('device_id') else "<span class='badge bg-warning text-dark'><i class='fa-solid fa-clock ms-1'></i> في انتظار التسجيل</span>"
             monthly_h = t.get('monthly_hours', {})
             executed_hrs = sum([float(v) for v in monthly_h.values()]) if monthly_h else 0
             contract_hrs = float(t.get('contract_hours', 300))
             remaining_hrs = contract_hrs - executed_hrs
-            rem_color = "#2e7d32" if remaining_hrs >= 0 else "#c62828"
+            rem_badge = f"<span class='badge bg-success'>{remaining_hrs:.0f} ساعة</span>" if remaining_hrs >= 0 else f"<span class='badge bg-danger'>{remaining_hrs:.0f} ساعة</span>"
             
             teachers_rows += f"""
             <tr>
-                <td><b>{t.get('name')}</b></td>
-                <td><code style='color:#0d47a1;'>{u}</code></td>
+                <td class='fw-bold text-start'>{t.get('name')}</td>
+                <td><code>{u}</code></td>
                 <td><code>{t.get('password')}</code></td>
                 <td>{dev_stat}</td>
                 <td><b>{int(contract_hrs)} ساعة</b></td>
-                <td><b style='color:#0d47a1;'>{executed_hrs:.0f} ساعة</b></td>
-                <td><b style='color:{rem_color};'>{remaining_hrs:.0f} ساعة</b></td>
+                <td><span class='text-primary fw-bold'>{executed_hrs:.0f} ساعة</span></td>
+                <td>{rem_badge}</td>
             </tr>
             """
     else:
-        teachers_rows = "<tr><td colspan='7' style='color:#666;'>لا توجد حسابات أساتذة مسجلة. ارفع ملفات الإكسل ثم اضغط على زر توليد الحسابات أعلاه.</td></tr>"
+        teachers_rows = "<tr><td colspan='7' class='text-muted py-3'>لا توجد حسابات أساتذة مسجلة. ارفع ملفات الإكسل ثم اضغط على زر توليد الحسابات أعلاه.</td></tr>"
     
     field_rows = ""
     for fs in reversed(field_sessions):
-        stat = "<span style='color:#2e7d32; font-weight:bold;'>مكتملة بالـ GPS</span>" if fs.get('status')=='مكتملة' else "<span style='color:#e65100;'>قيد الانتظار</span>"
-        field_rows += f"<tr><td><b>{fs.get('location')}</b><br><small>{fs.get('class_name')}</small></td><td>{fs.get('primary_teacher')}</td><td>{stat}</td></tr>"
+        stat = "<span class='badge bg-success'><i class='fa-solid fa-check ms-1'></i> مكتملة بالـ GPS</span>" if fs.get('status')=='مكتملة' else "<span class='badge bg-warning text-dark'><i class='fa-solid fa-hourglass-half ms-1'></i> قيد الانتظار</span>"
+        field_rows += f"<tr><td class='text-start'><b>{fs.get('location')}</b><br><small class='text-muted'>{fs.get('class_name')}</small></td><td class='fw-bold'>{fs.get('primary_teacher')}</td><td>{stat}</td></tr>"
 
     replies_html = ""
     for idx, r in enumerate(reversed(admin_replies)):
         real_idx = len(admin_replies) - 1 - idx
         replies_html += f"""
-        <div style="background:#fff3e0; border-right:4px solid #e65100; padding:10px; margin-bottom:8px; border-radius:6px; display:flex; justify-content:space-between; align-items:center;">
-            <div><b>من: {r.get('teacher_name')}</b><br>{r.get('message')}</div>
-            <form method="POST" action="/admin/delete_reply/{real_idx}" style="margin:0;"><button type="submit" style="background:#c62828; padding:5px 10px; width:auto;">مسح</button></form>
+        <div class="alert alert-warning border-start border-warning border-4 shadow-sm d-flex justify-content-between align-items-center mb-3">
+            <div>
+                <h6 class="fw-bold mb-1 text-dark"><i class="fa-solid fa-user-pen ms-1"></i> من: {r.get('teacher_name')} <small class="text-muted fw-normal ms-2">({r.get('date')})</small></h6>
+                <p class="mb-0 text-secondary">{r.get('message')}</p>
+            </div>
+            <form method="POST" action="/admin/delete_reply/{real_idx}" class="m-0"><button type="submit" class="btn btn-outline-danger btn-sm"><i class="fa-solid fa-trash"></i></button></form>
         </div>
         """
 
@@ -640,18 +664,18 @@ def admin_dashboard():
                 tds = "".join([f"<td>{r.get(c, '')}</td>" for c in cols])
                 body_tr += f"<tr>{tds}</tr>"
         else:
-            body_tr = f"<tr><td colspan='{len(cols) or 1}'>لم يتم رفع بيانات لهذا الملف بعد</td></tr>"
+            body_tr = f"<tr><td colspan='{len(cols) or 1}' class='text-muted py-3'>لم يتم رفع بيانات لهذا الملف بعد</td></tr>"
 
         directorate_htmls[k] = f"""
-        <div style="background:white; border:1px solid #bbdefb; border-radius:8px; padding:15px; margin-bottom:20px; box-shadow:0 2px 5px rgba(0,0,0,0.05);">
-            <h4 style="color:#0d47a1; margin-top:0; border-bottom:2px solid #e3f2fd; padding-bottom:8px;">📂 {tinfo.get('title')}</h4>
-            <div style="overflow-x:auto;">
-                <table>
-                    <tr>{headers_th}</tr>
-                    {body_tr}
+        <div class="card card-custom p-4 active shadow-sm">
+            <h4 class="text-primary mb-3 fw-bold border-bottom pb-2"><i class="fa-solid fa-folder-tree ms-2"></i> {tinfo.get('title')}</h4>
+            <div class="table-responsive">
+                <table class="table table-bordered table-striped table-hover table-custom">
+                    <thead><tr>{headers_th}</tr></thead>
+                    <tbody>{body_tr}</tbody>
                 </table>
             </div>
-            <small style="color:#555; display:block; margin-top:8px;">إجمالي السجلات: <b>{len(rows)}</b> سجل</small>
+            <div class="small text-muted mt-3">إجمالي السجلات: <b class="text-dark">{len(rows)}</b> سجل</div>
         </div>
         """
 
@@ -662,195 +686,232 @@ def admin_dashboard():
     <!DOCTYPE html>
     <html lang="ar" dir="rtl">
     <head>
-        <meta charset="UTF-8">
-        <title>الجمهورية اللبنانية 🌲 - لوحة الإدارة</title>
+        {{ shared_head | safe }}
+        <title>لوحة الإدارة الذكية - معهد الهرمل الفني</title>
         <style>
-            body { font-family: system-ui, sans-serif; background: #f4f6f9; margin: 0; padding-bottom: 30px; }
-            .container { padding: 20px; }
-            .card { background: white; padding: 20px; border-radius: 8px; margin-top: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); border-top: 4px solid #0d47a1; display: none; }
-            .card.active { display: block; }
-            input, select, textarea, button { width: 100%; padding: 10px; margin-top: 6px; box-sizing: border-box; font-family: inherit; }
-            button { background: #0d47a1; color: white; border: none; font-weight: bold; cursor: pointer; border-radius: 5px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-            th, td { border: 1px solid #e0e0e0; padding: 9px; text-align: center; font-size: 13.5px; }
-            th { background: #0d47a1; color: white; }
-            .print-btn { background: #198754; width: auto; padding: 8px 16px; margin-bottom: 15px; }
-            @media print { .no-print { display: none; } body { background: white; } .card { display: block !important; box-shadow: none; border: none; } }
+            @media print { .no-print { display: none !important; } body { background: white !important; } .card-custom { box-shadow: none !important; border: none !important; display: block !important; } }
         </style>
     </head>
     <body>
-        ''' + HEADER_VTE_HTML + '''
+        {{ header_html | safe }}
 
-        <div class="container">
-            {% if msg %}<div style="background:#e8f5e9; color:#2e7d32; padding:12px; border-radius:6px; font-weight:bold; margin-bottom:15px;">{{ msg }}</div>{% endif %}
+        <div class="container-fluid py-4 px-4">
+            {% if msg %}
+            <div class="alert alert-success alert-dismissible fade show shadow-sm fw-bold" role="alert">
+                <i class="fa-solid fa-circle-check ms-2"></i> {{ msg }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+            {% endif %}
 
-            <div id="attendanceReportSec" class="card active">
-                <div style="text-align:center; border-bottom:2px solid #333; padding-bottom:10px; margin-bottom:15px;">
-                    <h3 style="margin:2px 0;">الجمهورية اللبنانية 🌲</h3>
-                    <h4 style="margin:2px 0;">وزارة التربية والتعليم العالي - المديرية العامة للتعليم المهني والتقني</h4>
-                    <h4 style="margin:2px 0;">معهد الهرمل الفني</h4>
-                    <p style="margin:5px 0; font-weight:bold; color:#0d47a1;">نظام توثيق الحضور والإنصراف - تصميم وإشراف: مدير المعهد</p>
+            <div id="attendanceReportSec" class="card card-custom p-4 active">
+                <div class="text-center border-bottom pb-3 mb-4">
+                    <h4 class="fw-bold text-dark mb-1">الجمهورية اللبنانية 🌲</h4>
+                    <h5 class="text-secondary mb-1">وزارة التربية والتعليم العالي - المديرية العامة للتعليم المهني والتقني</h5>
+                    <h5 class="text-primary fw-bold mb-2">معهد الهرمل الفني</h5>
+                    <p class="badge bg-primary bg-opacity-10 text-primary px-3 py-2 rounded-pill fw-bold">كشف الدوام والتغيب التفصيلي للأساتذة (النصاب الأسبوعي: 20 حصة)</p>
                 </div>
-                <button class="print-btn no-print" onclick="window.print()">🖨️ طباعة التقرير الرسمي (مع تواريخ التغيب والنصاب)</button>
-                <h3 style="color:#0d47a1; margin-top:0;">⏱️ كشف الدوام والتغيب التفصيلي للأساتذة (20 حصة أسبوعياً)</h3>
-                <table>
-                    <tr>
-                        <th>اسم الأستاذ</th>
-                        <th>رقم البصمة (ID)</th>
-                        <th>النصاب الأسبوعي</th>
-                        <th>تاريخ التغيب المسجل</th>
-                        <th>الحالة</th>
-                    </tr>
-                    <tr>
-                        <td><b>إيمان جانبيه</b></td>
-                        <td><code>32</code></td>
-                        <td><b>20 حصة</b></td>
-                        <td style="color:#c62828; font-weight:bold;">2026/10/26 (الحصة 3)</td>
-                        <td><span style="color:#c62828; font-weight:bold;">غائب</span></td>
-                    </tr>
-                </table>
+                <div class="text-end mb-3 no-print">
+                    <button class="btn btn-success btn-sm fw-bold shadow-sm" onclick="window.print()"><i class="fa-solid fa-print ms-1"></i> طباعة التقرير الرسمي</button>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-bordered table-hover table-custom">
+                        <thead>
+                            <tr>
+                                <th>اسم الأستاذ</th>
+                                <th>رقم البصمة (ID)</th>
+                                <th>النصاب الأسبوعي</th>
+                                <th>تاريخ التغيب المسجل</th>
+                                <th>الحالة</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td class="fw-bold text-start">إيمان جانبيه</td>
+                                <td><code>32</code></td>
+                                <td><b>20 حصة</b></td>
+                                <td class="text-danger fw-bold">2026/10/26 (الحصة 3)</td>
+                                <td><span class="badge bg-danger">غائب</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
-            <div id="studentAttendanceSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">📋 سجل حضور وغياب الطلاب</h3>
-                <table>
-                    <tr><th>الصف والتاريخ</th><th>الطلاب المتغيبون</th></tr>
-                    {{ attendance_rows | safe if attendance_rows else '<tr><td colspan="2">لا توجد بيانات غياب مسجلة</td></tr>' }}
-                </table>
+            <div id="studentAttendanceSec" class="card card-custom p-4">
+                <h4 class="text-primary fw-bold mb-3"><i class="fa-solid fa-clipboard-user ms-2"></i> سجل حضور وغياب الطلاب</h4>
+                <div class="table-responsive">
+                    <table class="table table-bordered table-hover table-custom">
+                        <thead><tr><th>الصف والتاريخ</th><th>الطلاب المتغيبون</th></tr></thead>
+                        <tbody>{{ attendance_rows | safe if attendance_rows else '<tr><td colspan="2" class="text-muted py-3">لا توجد بيانات غياب مسجلة</td></tr>' }}</tbody>
+                    </table>
+                </div>
             </div>
 
-            <div id="studentGradesSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">📝 علامات ونتائج الطلاب (من 20)</h3>
-                <table>
-                    <tr><th>اسم الطالب والمادة</th><th>العلامة</th></tr>
-                    {{ grades_rows | safe if grades_rows else '<tr><td colspan="2">لم تُدخل علامات بعد</td></tr>' }}
-                </table>
+            <div id="studentGradesSec" class="card card-custom p-4">
+                <h4 class="text-primary fw-bold mb-3"><i class="fa-solid fa-star ms-2"></i> علامات ونتائج الطلاب (من 20)</h4>
+                <div class="table-responsive">
+                    <table class="table table-bordered table-hover table-custom">
+                        <thead><tr><th>اسم الطالب والمادة</th><th>العلامة</th></tr></thead>
+                        <tbody>{{ grades_rows | safe if grades_rows else '<tr><td colspan="2" class="text-muted py-3">لم تُدخل علامات بعد</td></tr>' }}</tbody>
+                    </table>
+                </div>
             </div>
 
-            <div id="viewRegisteredStudents" class="card">
+            <div id="viewRegisteredStudents" class="card card-custom p-4">
                 {{ directorate_htmls.get('students_registered', '') | safe }}
             </div>
 
-            <div id="viewTeachersCards" class="card">
+            <div id="viewTeachersCards" class="card card-custom p-4">
                 {{ directorate_htmls.get('teachers_cards', '') | safe }}
-                <div style="margin-top:15px;"></div>
+                <div class="my-4"></div>
                 {{ directorate_htmls.get('personal_info', '') | safe }}
             </div>
 
-            <div id="viewFingerprintIds" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">🆔 أرقام بصمات الأساتذة والموظفين (الملاك، المتعاقدين، شراء الخدمات)</h3>
+            <div id="viewFingerprintIds" class="card card-custom p-4">
+                <h4 class="text-primary fw-bold mb-3"><i class="fa-solid fa-fingerprint ms-2"></i> أرقام بصمات الأساتذة والموظفين</h4>
                 {{ directorate_htmls.get('fingerprint_ids', '') | safe }}
             </div>
 
-            <div id="viewWeeklySchedule" class="card">
+            <div id="viewWeeklySchedule" class="card card-custom p-4">
                 {{ directorate_htmls.get('weekly_schedule', '') | safe }}
             </div>
 
-            <div id="viewExecutedHours" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">⏱️ الساعات المنفذة شهرياً</h3>
+            <div id="viewExecutedHours" class="card card-custom p-4">
+                <h4 class="text-primary fw-bold mb-3"><i class="fa-solid fa-chart-line ms-2"></i> الساعات المنفذة شهرياً</h4>
                 {{ executed_hours_table_html | safe }}
             </div>
 
-            <div id="teachersListSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">👨‍🏫 سجل الأساتذة وحسابات الدخول وساعات العقود</h3>
-                <form method="POST" style="margin-bottom:15px;">
-                    <input type="hidden" name="action" value="create_auto_accounts">
-                    <button type="submit" style="background:#2e7d32;">⚡ توليد يوزر وباسورد افتراضي لجميع الأساتذة تلقائياً من الملفات المرفوعة</button>
-                </form>
-                <table>
-                    <tr>
-                        <th>اسم الأستاذ</th>
-                        <th>اسم المستخدم</th>
-                        <th>كلمة المرور</th>
-                        <th>حالة الهاتف</th>
-                        <th>العقد الإجمالي</th>
-                        <th>المنفذ حتى الآن</th>
-                        <th>المتبقي من العقد</th>
-                    </tr>
-                    {{ teachers_rows | safe }}
-                </table>
+            <div id="teachersListSec" class="card card-custom p-4">
+                <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+                    <h4 class="text-primary fw-bold m-0"><i class="fa-solid fa-chalkboard-user ms-2"></i> سجل الأساتذة وحسابات الدخول وساعات العقود</h4>
+                    <form method="POST" class="m-0">
+                        <input type="hidden" name="action" value="create_auto_accounts">
+                        <button type="submit" class="btn btn-success btn-sm fw-bold shadow-sm"><i class="fa-solid fa-wand-magic-sparkles ms-1"></i> توليد حسابات الأساتذة تلقائياً</button>
+                    </form>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-bordered table-hover table-custom">
+                        <thead>
+                            <tr>
+                                <th>اسم الأستاذ</th>
+                                <th>اسم المستخدم</th>
+                                <th>كلمة المرور</th>
+                                <th>حالة الهاتف</th>
+                                <th>العقد الإجمالي</th>
+                                <th>المنفذ حتى الآن</th>
+                                <th>المتبقي من العقد</th>
+                            </tr>
+                        </thead>
+                        <tbody>{{ teachers_rows | safe }}</tbody>
+                    </table>
+                </div>
             </div>
 
-            <div id="fieldSessionSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">🏥 تكليف وإدارة التدريب الميداني (GPS)</h3>
-                <form action="/admin/create_field_session" method="POST">
-                    <label>المكان:</label>
-                    <select name="location" required>{{ locations_opts | safe }}</select>
-                    <label>الصف:</label>
-                    <input type="text" name="class_name" placeholder="سنة ثالثة عناية" required>
-                    <label>الاختصاص:</label>
-                    <input type="text" name="major" placeholder="تمريض" required>
-                    <label>الأستاذ المشرف:</label>
-                    <select name="primary_teacher" required>{{ teacher_opts | safe }}</select>
-                    <button type="submit" style="background:#1565c0; margin-top:10px;">حفظ وتكليف الجلسة</button>
+            <div id="fieldSessionSec" class="card card-custom p-4">
+                <h4 class="text-primary fw-bold mb-3"><i class="fa-solid fa-hospital ms-2"></i> تكليف وإدارة التدريب الميداني (GPS)</h4>
+                <form action="/admin/create_field_session" method="POST" class="bg-light p-4 rounded-3 border mb-4">
+                    <div class="row g-3">
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold">المكان التدريبي:</label>
+                            <select name="location" class="form-select" required>{{ locations_opts | safe }}</select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold">الصف:</label>
+                            <input type="text" name="class_name" class="form-control" placeholder="مثال: سنة ثالثة عناية" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold">الاختصاص:</label>
+                            <input type="text" name="major" class="form-control" placeholder="مثال: تمريض" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold">الأستاذ المشرف:</label>
+                            <select name="primary_teacher" class="form-select" required>{{ teacher_opts | safe }}</select>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary-custom mt-3 px-4 shadow-sm"><i class="fa-solid fa-circle-plus ms-1"></i> حفظ وتكليف الجلسة</button>
                 </form>
-                <h4 style="margin-top:20px; color:#0d47a1;">سجل الجلسات الميدانية:</h4>
-                <table>
-                    <tr><th>المكان والصف</th><th>المشرف</th><th>الحالة</th></tr>
-                    {{ field_rows | safe if field_rows else '<tr><td colspan="3">لا توجد جلسات</td></tr>' }}
-                </table>
+                <h5 class="text-dark fw-bold mb-3">سجل الجلسات الميدانية النشطة:</h5>
+                <div class="table-responsive">
+                    <table class="table table-bordered table-hover table-custom">
+                        <thead><tr><th>المكان والصف</th><th>المشرف</th><th>الحالة</th></tr></thead>
+                        <tbody>{{ field_rows | safe if field_rows else '<tr><td colspan="3" class="text-muted py-3">لا توجد جلسات ميدانية</td></tr>' }}</tbody>
+                    </table>
+                </div>
             </div>
 
-            <div id="uploadDirectorateFilesSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">⚙️ رفع ملفات المديرية والبصمة والساعات (Excel)</h3>
-                <form method="POST" enctype="multipart/form-data">
+            <div id="uploadDirectorateFilesSec" class="card card-custom p-4">
+                <h4 class="text-primary fw-bold mb-3"><i class="fa-solid fa-file-excel ms-2"></i> رفع ملفات المديرية والبصمة والساعات (Excel)</h4>
+                <form method="POST" enctype="multipart/form-data" class="bg-light p-4 rounded-3 border">
                     <input type="hidden" name="action" value="upload_directorate_file">
-                    
-                    <label><b>حدد نوع الملف المراد رفعه:</b></label>
-                    <select name="file_key" required style="font-weight:bold; background:#e3f2fd;">
-                        <option value="fingerprint_ids">🆔 ملف البصمة ID (الملاك، المتعاقدين، شراء الخدمات)</option>
-                        <option value="students_registered">📂 الطلاب المسجلون</option>
-                        <option value="teachers_cards">📇 بطاقات الاساتذة</option>
-                        <option value="personal_info">👤 المعلومات الشخصية</option>
-                        <option value="weekly_schedule">📅 البرنامج الأسبوعي مع الاساتذة والمواد</option>
-                        <option value="executed_hours">⏱️ الساعات المنفذة للاساتذة</option>
-                    </select>
-
-                    <label style="margin-top:12px; display:block;"><b>اختر ملف الإكسل (.xlsx أو .xls):</b></label>
-                    <input type="file" name="excel_file" accept=".xlsx, .xls" required>
-                    
-                    <button type="submit" style="margin-top:15px; background:#2e7d32; font-size:15px;">📥 رفع وتحديث الملف فوراً</button>
+                    <div class="mb-3 text-start">
+                        <label class="form-label fw-bold small text-secondary">حدد نوع الملف المراد رفعه:</label>
+                        <select name="file_key" class="form-select fw-bold" required>
+                            <option value="fingerprint_ids">🆔 ملف البصمة ID (الملاك، المتعاقدين، شراء الخدمات)</option>
+                            <option value="students_registered">📂 الطلاب المسجلون</option>
+                            <option value="teachers_cards">📇 بطاقات الاساتذة</option>
+                            <option value="personal_info">👤 المعلومات الشخصية</option>
+                            <option value="weekly_schedule">📅 البرنامج الأسبوعي مع الاساتذة والمواد</option>
+                            <option value="executed_hours">⏱️ الساعات المنفذة للاساتذة</option>
+                        </select>
+                    </div>
+                    <div class="mb-3 text-start">
+                        <label class="form-label fw-bold small text-secondary">اختر ملف الإكسل (.xlsx أو .xls):</label>
+                        <input type="file" name="excel_file" class="form-control" accept=".xlsx, .xls" required>
+                    </div>
+                    <button type="submit" class="btn btn-success px-4 fw-bold shadow-sm"><i class="fa-solid fa-cloud-arrow-up ms-1"></i> رفع وتحديث الملف فوراً</button>
                 </form>
             </div>
 
-            <div id="deviceBindingSec" class="card">
-                <h3 style="color:#c62828; margin-top:0;">📱 إدارة أجهزة الأساتذة (إعادة تعيين الجهاز)</h3>
-                <form method="POST">
+            <div id="deviceBindingSec" class="card card-custom p-4">
+                <h4 class="text-danger fw-bold mb-3"><i class="fa-solid fa-mobile-screen-button ms-2"></i> إدارة أجهزة الأساتذة (فك ربط الجهاز)</h4>
+                <form method="POST" class="bg-light p-4 rounded-3 border" style="max-width: 600px;">
                     <input type="hidden" name="action" value="reset_teacher_device">
-                    <label>اختر الأستاذ:</label>
-                    <select name="target_user" required><option value="">-- اختر الأستاذ --</option>{{ teacher_opts | safe }}</select>
-                    <button type="submit" style="margin-top:10px; background:#c62828;">🔓 مسح البصمة والسماح بتسجيل هاتف جديد</button>
+                    <div class="mb-3 text-start">
+                        <label class="form-label fw-bold small text-secondary">اختر الأستاذ:</label>
+                        <select name="target_user" class="form-select" required><option value="">-- اختر الأستاذ --</option>{{ teacher_opts | safe }}</select>
+                    </div>
+                    <button type="submit" class="btn btn-danger px-4 fw-bold shadow-sm"><i class="fa-solid fa-unlock ms-1"></i> مسح بصمة الجهاز والسماح بتسجيل هاتف جديد</button>
                 </form>
             </div>
 
-            <div id="sendNotifSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">📢 إرسال تعميم إداري</h3>
-                <form method="POST">
+            <div id="sendNotifSec" class="card card-custom p-4">
+                <h4 class="text-primary fw-bold mb-3"><i class="fa-solid fa-bullhorn ms-2"></i> إرسال تعميم إداري للأساتذة</h4>
+                <form method="POST" class="bg-light p-4 rounded-3 border" style="max-width: 700px;">
                     <input type="hidden" name="action" value="send_notification">
-                    <select name="target_user" required><option value="all">📢 إرسال للجميع</option>{{ teacher_opts | safe }}</select>
-                    <textarea name="notification_text" placeholder="اكتب التعميم..." required style="height:70px;"></textarea>
-                    <button type="submit" style="margin-top:10px;">إرسال</button>
+                    <div class="mb-3 text-start">
+                        <label class="form-label fw-bold small text-secondary">المستهدف:</label>
+                        <select name="target_user" class="form-select" required><option value="all">📢 إرسال لجميع الأساتذة</option>{{ teacher_opts | safe }}</select>
+                    </div>
+                    <div class="mb-3 text-start">
+                        <label class="form-label fw-bold small text-secondary">نص التعميم:</label>
+                        <textarea name="notification_text" class="form-control" rows="3" placeholder="اكتب نص التعميم هنا..." required></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary-custom px-4 shadow-sm"><i class="fa-solid fa-paper-plane ms-1"></i> إرسال التعميم</button>
                 </form>
             </div>
 
-            <div id="teacherRepliesSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">📩 الأعذار والرسائل الواردة</h3>
-                {{ replies_html | safe if replies_html else '<p>لا توجد رسائل.</p>' }}
+            <div id="teacherRepliesSec" class="card card-custom p-4">
+                <h4 class="text-primary fw-bold mb-3"><i class="fa-solid fa-envelope-open-text ms-2"></i> الأعذار والرسائل الواردة من الأساتذة</h4>
+                {{ replies_html | safe if replies_html else '<div class="alert alert-light border text-muted py-3 text-center">لا توجد رسائل أو أعذار واردة حالياً.</div>' }}
             </div>
 
-            <div id="changePassSec" class="card">
-                <h3 style="color:#0d47a1; margin-top:0;">🔑 تغيير كلمة السر الإدارية</h3>
-                <form method="POST">
+            <div id="changePassSec" class="card card-custom p-4">
+                <h4 class="text-danger fw-bold mb-3"><i class="fa-solid fa-key ms-2"></i> تغيير كلمة السر الإدارية</h4>
+                <form method="POST" class="bg-light p-4 rounded-3 border" style="max-width: 450px;">
                     <input type="hidden" name="action" value="change_admin_password">
-                    <input type="password" name="new_password" placeholder="كلمة المرور الجديدة" required>
-                    <button type="submit" style="background:#c62828; margin-top:10px;">تحديث</button>
+                    <div class="mb-3 text-start">
+                        <label class="form-label fw-bold small text-secondary">كلمة المرور الجديدة:</label>
+                        <input type="password" name="new_password" class="form-control" placeholder="أدخل كلمة المرور الجديدة" required>
+                    </div>
+                    <button type="submit" class="btn btn-danger px-4 fw-bold shadow-sm"><i class="fa-solid fa-floppy-disk ms-1"></i> تحديث كلمة المرور</button>
                 </form>
             </div>
         </div>
 
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
         <script>
             function showSection(secId) {
-                document.querySelectorAll('.card').forEach(el => el.classList.remove('active'));
+                document.querySelectorAll('.card-custom').forEach(el => el.classList.remove('active'));
                 let target = document.getElementById(secId);
                 if(target) target.classList.add('active');
             }
@@ -858,7 +919,7 @@ def admin_dashboard():
     </body>
     </html>
     '''
-    return render_template_string(admin_template, attendance_rows=attendance_rows, grades_rows=grades_rows, teachers_rows=teachers_rows, field_rows=field_rows, replies_html=replies_html, teacher_opts=teacher_opts, locations_opts=locations_opts, directorate_htmls=directorate_htmls, executed_hours_table_html=executed_hours_table_html, msg=msg)
+    return render_template_string(admin_template, header_html=HEADER_VTE_HTML, shared_head=SHARED_HEAD, attendance_rows=attendance_rows, grades_rows=grades_rows, teachers_rows=teachers_rows, field_rows=field_rows, replies_html=replies_html, teacher_opts=teacher_opts, locations_opts=locations_opts, directorate_htmls=directorate_htmls, executed_hours_table_html=executed_hours_table_html, msg=msg)
 
 @app.route('/teacher', methods=['GET', 'POST'])
 def teacher_dashboard():
@@ -906,9 +967,11 @@ def teacher_dashboard():
             save_all_data()
             msg = "تم إرسال رسالتك للإدارة بنجاح!"
 
-    my_classes = teacher_classes_map.get(username, list(classes_students.keys()))
+    my_classes = list(classes_students.keys())
     class_opts = "".join([f'<option value="{c}">{c}</option>' for c in my_classes])
-    notifs = "".join([f"<div style='background:#e3f2fd; padding:8px; margin-bottom:5px; border-radius:4px; font-weight:bold;'>🔔 {n}</div>" for n in user_data.get('notifications', [])])
+    
+    raw_notifs = user_data.get('notifications', [])
+    notifs = "".join([f"<div class='alert alert-info py-2 mb-2 small fw-bold shadow-sm'><i class='fa-solid fa-bell ms-1'></i> {n}</div>" for n in raw_notifs])
 
     monthly_hrs = user_data.get('monthly_hours', {})
     contract_hrs = float(user_data.get('contract_hours', 300))
@@ -920,30 +983,36 @@ def teacher_dashboard():
         m_headers = "".join([f"<th>ش {m}</th>" for m in MONTH_COLUMNS])
         m_tds = "".join([f"<td>{monthly_hrs.get(m, 0):.0f}</td>" for m in MONTH_COLUMNS])
         hrs_html = f"""
-        <div class="card" style="border-top:4px solid #1565c0; background:#ffffff;">
-            <h4 style="color:#0d47a1; margin-top:0; border-bottom:2px solid #e3f2fd; padding-bottom:8px;">📊 ملخص عقد الساعات والمنفذ شهرياً:</h4>
-            <div style="display:flex; gap:12px; margin-bottom:15px; flex-wrap:wrap;">
-                <div style="flex:1; min-width:140px; background:#e3f2fd; padding:12px; border-radius:8px; text-align:center;">
-                    <small style="color:#0d47a1; font-weight:bold;">ساعات العقد</small>
-                    <div style="font-size:20px; font-weight:bold; color:#0d47a1; margin-top:4px;">{int(contract_hrs)} ساعة</div>
+        <div class="card card-custom p-4 active shadow-sm mb-4 border-top border-primary border-4">
+            <h5 class="text-primary fw-bold mb-3"><i class="fa-solid fa-chart-pie ms-2"></i> ملخص عقد الساعات والمنفذ شهرياً:</h5>
+            <div class="row g-3 mb-4">
+                <div class="col-md-4">
+                    <div class="p-3 bg-light rounded-3 text-center border">
+                        <small class="text-muted fw-bold">ساعات العقد الإجمالية</small>
+                        <div class="fs-4 fw-bold text-primary mt-1">{int(contract_hrs)} ساعة</div>
+                    </div>
                 </div>
-                <div style="flex:1; min-width:140px; background:#e8f5e9; padding:12px; border-radius:8px; text-align:center;">
-                    <small style="color:#2e7d32; font-weight:bold;">المنفذ حتى الآن</small>
-                    <div style="font-size:20px; font-weight:bold; color:#2e7d32; margin-top:4px;">{executed_hrs:.0f} ساعة</div>
+                <div class="col-md-4">
+                    <div class="p-3 bg-success bg-opacity-10 rounded-3 text-center border border-success">
+                        <small class="text-success fw-bold">المنفذ حتى الآن</small>
+                        <div class="fs-4 fw-bold text-success mt-1">{executed_hrs:.0f} ساعة</div>
+                    </div>
                 </div>
-                <div style="flex:1; min-width:140px; background:#fff3e0; padding:12px; border-radius:8px; text-align:center;">
-                    <small style="color:#e65100; font-weight:bold;">المتبقي</small>
-                    <div style="font-size:20px; font-weight:bold; color:#e65100; margin-top:4px;">{remaining_hrs:.0f} ساعة</div>
+                <div class="col-md-4">
+                    <div class="p-3 bg-warning bg-opacity-10 rounded-3 text-center border border-warning">
+                        <small class="text-warning-emphasis fw-bold">المتبقي من العقد</small>
+                        <div class="fs-4 fw-bold text-warning-emphasis mt-1">{remaining_hrs:.0f} ساعة</div>
+                    </div>
                 </div>
             </div>
-            <div style="overflow-x:auto;"><table style="width:100%; border-collapse:collapse;"><tr>{m_headers}</tr><tr>{m_tds}</tr></table></div>
+            <div class="table-responsive"><table class="table table-bordered table-custom"><thead><tr>{m_headers}</tr></thead><tbody><tr>{m_tds}</tr></tbody></table></div>
         </div>
         """
     else:
         hrs_html = f"""
-        <div class="card" style="border-top:4px solid #1565c0;">
-            <h4 style="color:#0d47a1; margin-top:0;">📊 ملخص العقد والساعات:</h4>
-            <p style="margin:0; color:#555;">ساعات العقد الإجمالية: <b>{int(contract_hrs)} ساعة</b>.</p>
+        <div class="card card-custom p-4 active shadow-sm mb-4 border-top border-primary border-4">
+            <h5 class="text-primary fw-bold mb-2"><i class="fa-solid fa-file-contract ms-2"></i> ملخص العقد والساعات:</h5>
+            <p class="text-muted mb-0">ساعات العقد الإجمالية: <b class="text-dark">{int(contract_hrs)} ساعة</b>.</p>
         </div>
         """
 
@@ -951,11 +1020,16 @@ def teacher_dashboard():
     teacher_schedule_items = parsed_schedule.get(t_name, [])
     schedule_html = ""
     if teacher_schedule_items:
-        schedule_rows = "".join([f"<tr><td><b>{item.get('day')}</b></td><td>{item.get('period')}</td><td>{item.get('class')}</td><td><b style='color:#0d47a1;'>{item.get('subject')}</b></td></tr>" for item in teacher_schedule_items])
+        schedule_rows = "".join([f"<tr><td><b>{item.get('day')}</b></td><td>{item.get('period')}</td><td>{item.get('class')}</td><td><b class='text-primary'>{item.get('subject')}</b></td></tr>" for item in teacher_schedule_items])
         schedule_html = f"""
-        <div class="card" style="border-top:4px solid #2e7d32;">
-            <h4 style="color:#2e7d32; margin-top:0;">📅 برنامجي الأسبوعي:</h4>
-            <table><tr><th>اليوم</th><th>الحصة</th><th>الصف والمستوى</th><th>المادة</th></tr>{schedule_rows}</table>
+        <div class="card card-custom p-4 active shadow-sm mb-4 border-top border-success border-4">
+            <h5 class="text-success fw-bold mb-3"><i class="fa-solid fa-calendar-days ms-2"></i> برنامجي الأسبوعي:</h5>
+            <div class="table-responsive">
+                <table class="table table-bordered table-hover table-custom">
+                    <thead><tr><th>اليوم</th><th>الحصة</th><th>الصف والمستوى</th><th>المادة</th></tr></thead>
+                    <tbody>{schedule_rows}</tbody>
+                </table>
+            </div>
         </div>
         """
 
@@ -964,90 +1038,102 @@ def teacher_dashboard():
     for s in my_sessions:
         if s.get('status') == 'قيد التدريب':
             field_html += f'''
-            <div style="background:#f9fbe7; border:1px solid #c0ca33; padding:12px; border-radius:6px; margin-top:8px;">
-                <b>📍 مكان التدريب الميداني: {s.get('location')} ({s.get('class_name')})</b>
-                <button type="button" onclick="submitGps({s.get('id')}, '{t_name}', '{s.get('location')}')" style="background:#2e7d32; margin-top:8px;">📍 توثيق الحضور الجغرافي (GPS)</button>
+            <div class="alert alert-warning border-warning border-4 shadow-sm mb-4 d-flex justify-content-between align-items-center flex-wrap gap-3">
+                <div>
+                    <h6 class="fw-bold text-dark mb-1"><i class="fa-solid fa-location-dot text-danger ms-1"></i> مكان التدريب الميداني: {s.get('location')}</h6>
+                    <p class="mb-0 small text-muted">الصف: {s.get('class_name')}</p>
+                </div>
+                <button type="button" onclick="submitGps({s.get('id')}, '{t_name}', '{s.get('location')}')" class="btn btn-success btn-sm fw-bold shadow-sm"><i class="fa-solid fa-location-crosshairs ms-1"></i> توثيق الحضور الجغرافي (GPS)</button>
             </div>
             '''
         else:
-            field_html += f'''<div style="background:#e8f5e9; padding:8px; border-radius:6px; margin-top:8px; color:#2e7d32; font-weight:bold;">✔ تم توثيق الحضور الجغرافي لـ ({s.get('location')}) بنجاح!</div>'''
+            field_html += f'''<div class="alert alert-success shadow-sm mb-4 fw-bold"><i class="fa-solid fa-circle-check ms-2"></i> تم توثيق الحضور الجغرافي لـ ({s.get('location')}) بنجاح!</div>'''
 
     teacher_template = """
     <!DOCTYPE html>
     <html lang="ar" dir="rtl">
     <head>
-        <meta charset="UTF-8">
-        <title>الجمهورية اللبنانية 🌲 - واجهة الأستاذ</title>
-        <style>
-            body { font-family: system-ui, sans-serif; background: #f4f6f9; margin: 0; padding-bottom: 30px; }
-            .card { background: white; padding: 18px; border-radius: 8px; margin-top: 15px; box-shadow: 0 2px 6px rgba(0,0,0,0.05); border-top: 4px solid #0d47a1; }
-            input, select, textarea, button { width: 100%; padding: 10px; margin-top: 6px; box-sizing: border-box; font-family: inherit; }
-            button { background: #0d47a1; color: white; border: none; font-weight: bold; cursor: pointer; border-radius: 5px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-            th, td { border: 1px solid #e0e0e0; padding: 8px; text-align: center; font-size: 13px; }
-            th { background: #0d47a1; color: white; }
-            .student-row { display: flex; justify-content: space-between; align-items: center; padding: 8px; border-bottom: 1px solid #eee; background: #fafafa; margin-top: 5px; border-radius: 4px; }
-        </style>
+        {{ shared_head | safe }}
+        <title>واجهة الأستاذ - معهد الهرمل الفني</title>
     </head>
     <body>
-        <div style="background:#0d47a1; color:white; padding:12px 20px; display:flex; justify-content:space-between; align-items:center;">
-            <div><h3 style="margin:0;">الجمهورية اللبنانية 🌲 - معهد الهرمل الفني</h3><small>الأستاذ: {{ t_name }}</small></div>
-            <a href="/logout" style="color:#ffcdd2; background:#c62828; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px;">خروج</a>
-        </div>
+        <nav class="navbar navbar-expand-lg navbar-dark navbar-custom px-4 py-3">
+            <div class="container-fluid">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="bg-white p-2 rounded-circle text-primary shadow-sm">
+                        <i class="fa-solid fa-user-chalkboard fa-lg"></i>
+                    </div>
+                    <div>
+                        <div class="fw-bold fs-5 text-white">الجمهورية اللبنانية 🌲 - معهد الهرمل الفني</div>
+                        <div class="small text-info">الأستاذ: {{ t_name }}</div>
+                    </div>
+                </div>
+                <a href="/logout" class="btn btn-danger btn-sm px-3 fw-bold shadow-sm"><i class="fa-solid fa-right-from-bracket ms-1"></i> خروج</a>
+            </div>
+        </nav>
 
-        <div style="padding:15px;">
-            {% if msg %}<div style="background:#e8f5e9; color:#2e7d32; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold;">{{ msg }}</div>{% endif %}
+        <div class="container py-4" style="max-width: 900px;">
+            {% if msg %}
+            <div class="alert alert-success alert-dismissible fade show shadow-sm fw-bold" role="alert">
+                <i class="fa-solid fa-circle-check ms-2"></i> {{ msg }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+            {% endif %}
 
             {{ hrs_html | safe }}
             {{ schedule_html | safe }}
             {{ field_html | safe }}
 
-            <div class="card">
-                <h4 style="color:#0d47a1; margin-top:0;">🔑 تغيير كلمة المرور الخاصة بي:</h4>
-                <form method="POST">
-                    <input type="hidden" name="action" value="change_my_password">
-                    <input type="password" name="new_password" placeholder="كلمة المرور الجديدة..." required>
-                    <button type="submit" style="background:#1565c0; margin-top:8px;">تحديث كلمة المرور</button>
-                </form>
+            <div class="card card-custom p-4 active shadow-sm mb-4">
+                <h5 class="text-primary fw-bold mb-3"><i class="fa-solid fa-bullhorn ms-2"></i> التعاميم والتنبيهات الواردة:</h5>
+                {{ notifs | safe if notifs else '<div class="text-muted small">لا توجد تعاميم جديدة.</div>' }}
             </div>
 
-            <div class="card">
-                <h4 style="color:#0d47a1; margin-top:0;">📢 التعاميم الواردة:</h4>
-                {{ notifs | safe if notifs else '<p style="color:#666;">لا توجد تعاميم جديدة.</p>' }}
-            </div>
-
-            <div class="card">
-                <h4 style="color:#0d47a1; margin-top:0;">📋 توثيق حضور وغياب الطلاب اليومي:</h4>
+            <div class="card card-custom p-4 active shadow-sm mb-4">
+                <h5 class="text-primary fw-bold mb-3"><i class="fa-solid fa-clipboard-user ms-2"></i> توثيق حضور وغياب الطلاب اليومي:</h5>
                 <form method="POST">
                     <input type="hidden" name="action" value="submit_class_attendance">
-                    <label>اختر الصف:</label>
-                    <select name="class_name" id="attClass" onchange="loadStudentsForAtt()" required><option value="">-- اختر الصف --</option>{{ class_opts | safe }}</select>
-                    <div id="attContainer" style="margin-top:10px;"></div>
-                    <button type="submit" id="attBtn" style="display:none; background:#2e7d32; margin-top:10px;">حفظ الحضور والغياب</button>
+                    <div class="mb-3 text-start">
+                        <label class="form-label small fw-bold">اختر الصف:</label>
+                        <select name="class_name" id="attClass" class="form-select" onchange="loadStudentsForAtt()" required>
+                            <option value="">-- اختر الصف --</option>
+                            {{ class_opts | safe }}
+                        </select>
+                    </div>
+                    <div id="attContainer" class="mb-3"></div>
+                    <button type="submit" id="attBtn" class="btn btn-success px-4 fw-bold shadow-sm" style="display:none;"><i class="fa-solid fa-floppy-disk ms-1"></i> حفظ الحضور والغياب</button>
                 </form>
             </div>
 
-            <div class="card">
-                <h4 style="color:#0d47a1; margin-top:0;">📝 إدخال ورصد علامات الطلاب (من 20):</h4>
+            <div class="card card-custom p-4 active shadow-sm mb-4">
+                <h5 class="text-primary fw-bold mb-3"><i class="fa-solid fa-star ms-2"></i> إدخال ورصد علامات الطلاب (من 20):</h5>
                 <form method="POST">
                     <input type="hidden" name="action" value="submit_class_grades">
-                    <label>اختر الصف:</label>
-                    <select name="class_name" id="gradeClass" onchange="loadStudentsForGrades()" required><option value="">-- اختر الصف --</option>{{ class_opts | safe }}</select>
-                    <div id="gradeContainer" style="margin-top:10px;"></div>
-                    <button type="submit" id="gradeBtn" style="display:none; margin-top:10px;">حفظ ورصد العلامات</button>
+                    <div class="mb-3 text-start">
+                        <label class="form-label small fw-bold">اختر الصف:</label>
+                        <select name="class_name" id="gradeClass" class="form-select" onchange="loadStudentsForGrades()" required>
+                            <option value="">-- اختر الصف --</option>
+                            {{ class_opts | safe }}
+                        </select>
+                    </div>
+                    <div id="gradeContainer" class="mb-3"></div>
+                    <button type="submit" id="gradeBtn" class="btn btn-primary-custom px-4 fw-bold shadow-sm" style="display:none;"><i class="fa-solid fa-floppy-disk ms-1"></i> حفظ ورصد العلامات</button>
                 </form>
             </div>
 
-            <div class="card">
-                <h4 style="color:#0d47a1; margin-top:0;">💬 إرسال رسالة أو عذر للإدارة:</h4>
+            <div class="card card-custom p-4 active shadow-sm">
+                <h5 class="text-primary fw-bold mb-3"><i class="fa-solid fa-paper-plane ms-2"></i> إرسال رسالة أو عذر للإدارة:</h5>
                 <form method="POST">
                     <input type="hidden" name="action" value="send_reply">
-                    <textarea name="reply_message" placeholder="اكتب رسالتك..." required style="height:70px;"></textarea>
-                    <button type="submit" style="background:#1565c0; margin-top:8px;">إرسال للإدارة</button>
+                    <div class="mb-3 text-start">
+                        <textarea name="reply_message" class="form-control" rows="3" placeholder="اكتب رسالتك أو عذرك للإدارة هنا..." required></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary-custom px-4 shadow-sm"><i class="fa-solid fa-envelope ms-1"></i> إرسال للإدارة</button>
                 </form>
             </div>
         </div>
 
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
         <script>
             function loadStudentsForAtt() {
                 let cls = document.getElementById('attClass').value;
@@ -1056,9 +1142,15 @@ def teacher_dashboard():
                 cont.innerHTML = '';
                 if(!cls) { btn.style.display='none'; return; }
                 fetch('/api/get_students/' + encodeURIComponent(cls)).then(res => res.json()).then(data => {
-                    let html = '<p style="font-size:13.5px; color:#0d47a1; font-weight:bold;">الكل حاضر افتراضياً ✅ (أزل الصح عن المتغيب):</p>';
+                    let html = '<div class="alert alert-light border small fw-bold text-primary mb-3">الكل حاضر افتراضياً ✅ (أزل علامة الصح عن الطالب المتغيب):</div>';
                     data.students.forEach(st => {
-                        html += `<div class="student-row"><span>${st}</span><label style="color:#2e7d32; font-weight:bold; cursor:pointer;"><input type="checkbox" name="attendance_check" value="${st}" checked style="width:auto; transform:scale(1.2);"> حاضر</label></div>`;
+                        html += `<div class="d-flex justify-content-between align-items-center p-2 mb-2 bg-light rounded border">
+                            <span class="fw-bold">${st}</span>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" name="attendance_check" value="${st}" checked style="transform: scale(1.3);">
+                                <label class="form-check-label fw-bold text-success me-2">حاضر</label>
+                            </div>
+                        </div>`;
                     });
                     cont.innerHTML = html;
                     btn.style.display = 'block';
@@ -1074,7 +1166,10 @@ def teacher_dashboard():
                 fetch('/api/get_students/' + encodeURIComponent(cls)).then(res => res.json()).then(data => {
                     let html = '';
                     data.students.forEach(st => {
-                        html += `<div class="student-row"><span style="flex:1; font-weight:bold;">${st}</span><input type="number" step="0.5" min="0" max="20" name="grade_${st}" placeholder="العلامة /20" style="width:110px; margin-top:0;" required></div>`;
+                        html += `<div class="d-flex justify-content-between align-items-center p-2 mb-2 bg-light rounded border">
+                            <span class="fw-bold" style="flex:1;">${st}</span>
+                            <input type="number" step="0.5" min="0" max="20" name="grade_${st}" class="form-control text-center fw-bold" placeholder="/20" style="width: 120px;" required>
+                        </div>`;
                     });
                     cont.innerHTML = html;
                     btn.style.display = 'block';
@@ -1082,7 +1177,7 @@ def teacher_dashboard():
             }
 
             function submitGps(sessionId, teacherName, locationName) {
-                if(!navigator.geolocation) { alert("الـ GPS غير مدعوم في متصفحك"); return; }
+                if(!navigator.geolocation) { alert("خدمة تحديد الموقع (GPS) غير مدعومة في متصفحك"); return; }
                 navigator.geolocation.getCurrentPosition(function(pos) {
                     fetch('/teacher/submit_field_attendance', {
                         method: 'POST',
@@ -1092,13 +1187,13 @@ def teacher_dashboard():
                         alert(data.message);
                         if(data.success) location.reload();
                     });
-                }, function(err) { alert("يرجى تفعيل الـ GPS لتأكيد الحضور."); }, {enableHighAccuracy: true});
+                }, function(err) { alert("يرجى تفعيل الـ GPS في هاتفك لتأكيد الحضور الجغرافي."); }, {enableHighAccuracy: true});
             }
         </script>
     </body>
     </html>
     """
-    return render_template_string(teacher_template, t_name=t_name, msg=msg, class_opts=class_opts, notifs=notifs, hrs_html=hrs_html, schedule_html=schedule_html, field_html=field_html)
+    return render_template_string(teacher_template, shared_head=SHARED_HEAD, t_name=t_name, msg=msg, class_opts=class_opts, notifs=notifs, hrs_html=hrs_html, schedule_html=schedule_html, field_html=field_html)
 
 @app.route('/teacher/submit_field_attendance', methods=['POST'])
 def submit_field_attendance():
