@@ -1,8 +1,6 @@
 import os
 import json
-import io
 import math
-import shutil
 import re
 import pandas as pd
 from datetime import datetime
@@ -111,7 +109,6 @@ def load_from_disk(key, default_val=None):
         except: pass
     return default_val
 
-# قاعدة بيانات نظيفة بدون أسماء تجريبية افتراضية
 teachers_db = load_from_disk('teachers_db', {})
 grades_db = load_from_disk('grades_db', {})
 attendance_db = load_from_disk('attendance_db', {})
@@ -380,14 +377,12 @@ def admin_dashboard():
             
             if file and allowed_file(file.filename) and file_key in directorate_excel_tables:
                 try:
-                    # معالجة ملفات الإكسل التي قد تحتوي على أكثر من شيت (مثل ملف البصمة ID)
                     xls_file = pd.ExcelFile(file)
                     all_rows_data = []
                     all_clean_cols = []
                     
                     for sheet_name in xls_file.sheet_names:
                         df_sheet = pd.read_excel(xls_file, sheet_name=sheet_name)
-                        # تنظيف الأسماء أو تخطي السطور الفارغة
                         for _, row in df_sheet.iterrows():
                             row_dict = {}
                             has_val = False
@@ -484,13 +479,11 @@ def admin_dashboard():
 
         elif action == 'create_auto_accounts':
             count = 0
-            # توليد الحسابات من بطاقات الأساتذة ومن ملف أرقام البصمات (لتغطية كافة الأوراق والشيتات)
             sources_to_scan = []
             sources_to_scan.extend(directorate_excel_tables.get('teachers_cards', {}).get('data', []))
             sources_to_scan.extend(directorate_excel_tables.get('fingerprint_ids', {}).get('data', []))
             
             for card in sources_to_scan:
-                # البحث عن أي حقل يحتمل أن يكون اسماً للأستاذ
                 name = ""
                 for k, v in card.items():
                     if any(w in str(k) for w in ['اسم', 'الاسم', 'ملاك', 'متعاقد', 'الأساتذة', 'الاستاذ']) and len(str(v).strip()) > 2:
@@ -498,13 +491,11 @@ def admin_dashboard():
                             name = str(v).strip()
                             break
                 if not name:
-                    # محاولة أخذ أول قيمتين نصيتين في السطر
                     vals = [str(v).strip() for v in card.values() if v and not str(v).isdigit() and len(str(v).strip()) > 2]
                     if vals:
                         name = vals[0]
 
                 if name and name not in ['أساتذة الملاك', 'شراء الخدمات (خدمات اخرى)', 'شراءالخدمات (حراسة)', 'ID البصمة', 'بصمة ID']:
-                    # التحقق إذا كان الاسم غير موجود مسبقاً
                     exists = any(t['name'] == name for t in teachers_db.values())
                     if not exists:
                         user_id = f"teacher_{len(teachers_db) + 1}"
@@ -548,7 +539,7 @@ def admin_dashboard():
                 msg = "تم تغيير كلمة مرور الإدارة بنجاح!"
 
     attendance_rows = "".join([f"<tr><td><b>{k}</b></td><td style='color:#c62828;'>متغيبون: {v.get('absent', [])}</td></tr>" for k, v in attendance_db.items()])
-    grades_rows = "".join([f"<tr><td><b>{k}</b></td><td><b style='color:#0d47a1;'>{v} / 20</b></td></tr>" for k, v in grades_db.items()])
+    grades_rows = "".join([f"<tr><td><b>{k}</b></td><td><b style='color:#0d47a1;'>{v} / 20</b></td></tr>" for k, v in grades_rows.items()])
     
     executed_hours_table_html = ""
     monthly_data_map = directorate_excel_tables.get('executed_hours', {}).get('monthly_hours', {})
@@ -670,7 +661,6 @@ def admin_dashboard():
         <div class="container">
             {% if msg %}<div style="background:#e8f5e9; color:#2e7d32; padding:12px; border-radius:6px; font-weight:bold; margin-bottom:15px;">{{ msg }}</div>{% endif %}
 
-            <!-- قسم تقرير الحضور والغياب الرسمي -->
             <div id="attendanceReportSec" class="card active">
                 <div style="text-align:center; border-bottom:2px solid #333; padding-bottom:10px; margin-bottom:15px;">
                     <h3 style="margin:2px 0;">الجمهورية اللبنانية 🌲</h3>
@@ -1092,7 +1082,7 @@ def submit_field_attendance():
     if session.get('role') != 'teacher': return jsonify({"success": False, "message": "غير مصرح"}), 403
     data = request.json
     s_id = int(data.get('session_id'))
-    loc_name = data.get('location')`
+    loc_name = data.get('location')
     lat = float(data.get('lat'))
     lng = float(data.get('lng'))
 
