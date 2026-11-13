@@ -215,7 +215,6 @@ def handle_exception(e):
     <div dir="rtl" style="font-family:sans-serif; padding:30px; background:#ffebee; color:#c62828; border:2px solid #c62828; border-radius:8px; margin:20px;">
         <h2>⚠️ حدث خطأ تقني في النظام:</h2>
         <pre style="background:#fff; padding:15px; border:1px solid #ffcdd2; overflow-x:auto; direction:ltr; text-align:left;">{err_msg}</pre>
-        <p><b>أستاذ محمد:</b> يرجى إرسال لقطة شاشة لهذا الخطأ لكي نقوم بمعالجته فوراً بنقرة واحدة!</p>
     </div>
     """, 500
 
@@ -563,7 +562,7 @@ def admin_dashboard():
                 msg = "تم تغيير كلمة مرور الإدارة بنجاح!"
 
     attendance_rows = "".join([f"<tr><td><b>{k}</b></td><td style='color:#c62828;'>متغيبون: {v.get('absent', [])}</td></tr>" for k, v in attendance_db.items()])
-    grades_rows = "".join([f"<tr><td><b>{k}</b></td><td><b style='color:#0d47a1;'>{v} / 20</b></td></tr>" for k, v in grades_rows.items()])
+    grades_rows = "".join([f"<tr><td><b>{k}</b></td><td><b style='color:#0d47a1;'>{v} / 20</b></td></tr>" for k, v in grades_db.items()]) if grades_db else ""
     
     executed_hours_table_html = ""
     monthly_data_map = directorate_excel_tables.get('executed_hours', {}).get('monthly_hours', {})
