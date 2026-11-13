@@ -2,6 +2,7 @@ import os
 import json
 import math
 import re
+import traceback
 import pandas as pd
 from datetime import datetime
 from flask import Flask, render_template_string, request, redirect, url_for, session, send_from_directory, jsonify
@@ -96,7 +97,10 @@ def load_from_disk(key, default_val=None):
             cur.close()
             conn.close()
             if row and row.get('value') is not None:
-                return row['value']
+                val = row['value']
+                if isinstance(val, str):
+                    return json.loads(val)
+                return val
         except Exception as e:
             print(f"Error loading {key} from Supabase: {e}")
 
@@ -203,6 +207,17 @@ def parse_weekly_schedule(df):
     except Exception as e:
         print(f"Error parsing schedule: {e}")
     return parsed_teachers
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    err_msg = traceback.format_exc()
+    return f"""
+    <div dir="rtl" style="font-family:sans-serif; padding:30px; background:#ffebee; color:#c62828; border:2px solid #c62828; border-radius:8px; margin:20px;">
+        <h2>⚠️ حدث خطأ تقني في النظام:</h2>
+        <pre style="background:#fff; padding:15px; border:1px solid #ffcdd2; overflow-x:auto; direction:ltr; text-align:left;">{err_msg}</pre>
+        <p><b>أستاذ محمد:</b> يرجى إرسال لقطة شاشة لهذا الخطأ لكي نقوم بمعالجته فوراً بنقرة واحدة!</p>
+    </div>
+    """, 500
 
 HEADER_VTE_HTML = '''
 <div style="background:#0d47a1; color:white; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; border-bottom:3px solid #1565c0;">
