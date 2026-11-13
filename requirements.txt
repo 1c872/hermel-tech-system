@@ -1,5 +1,6 @@
 Flask==3.0.2
 pandas
+psycopg2-binary
 --only-binary=:all:
 openpyxl==3.1.2
 gunicorn==21.2.0
