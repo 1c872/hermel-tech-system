@@ -18,7 +18,6 @@ ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'xlsx', 'xls'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# الاتصال بقاعدة بيانات Supabase عبر متغير البيئة DATABASE_URL في Render
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
 def get_db_connection():
@@ -34,7 +33,6 @@ def get_db_connection():
 def init_supabase_db():
     conn = get_db_connection()
     if not conn:
-        print("Warning: Supabase DATABASE_URL not found or connection failed. Running without persistent cloud DB.")
         return
     try:
         cur = conn.cursor()
@@ -47,7 +45,6 @@ def init_supabase_db():
         conn.commit()
         cur.close()
         conn.close()
-        print("Supabase database initialized successfully!")
     except Exception as e:
         print(f"Error initializing Supabase tables: {e}")
 
@@ -81,7 +78,6 @@ def save_to_disk(key, value):
         except Exception as e:
             print(f"Error saving {key} to Supabase: {e}")
 
-    # Fallback محلي في حال لم يتم ضبط الرابط بعد
     local_data = {}
     if os.path.exists('local_db.json'):
         try:
@@ -115,14 +111,11 @@ def load_from_disk(key, default_val=None):
         except: pass
     return default_val
 
-# تحميل البيانات أو تهيئتها افتراضياً
-teachers_db = load_from_disk('teachers_db', {
-    "teacher_1": {"name": "أحمد خضر", "password": "123", "subject": "تمريض", "device_id": "", "notifications": [], "monthly_hours": {}, "contract_hours": 300},
-    "teacher_2": {"name": "علي ناصرالدين", "password": "123", "subject": "معلوماتية", "device_id": "", "notifications": [], "monthly_hours": {}, "contract_hours": 300}
-})
+# قاعدة بيانات نظيفة بدون أسماء تجريبية افتراضية
+teachers_db = load_from_disk('teachers_db', {})
 grades_db = load_from_disk('grades_db', {})
 attendance_db = load_from_disk('attendance_db', {})
-teacher_classes_map = load_from_disk('teacher_classes_map', {"teacher_1": ["سنة ثالثة عناية تمريضية"], "teacher_2": ["سنة ثانية معلوماتية"]})
+teacher_classes_map = load_from_disk('teacher_classes_map', {})
 admin_replies = load_from_disk('admin_replies', [])
 admin_credentials = load_from_disk('admin_credentials', {'username': 'admin', 'password': '123456'})
 classes_students = load_from_disk('classes_students', {
@@ -387,25 +380,29 @@ def admin_dashboard():
             
             if file and allowed_file(file.filename) and file_key in directorate_excel_tables:
                 try:
-                    df = pd.read_excel(file)
+                    # معالجة ملفات الإكسل التي قد تحتوي على أكثر من شيت (مثل ملف البصمة ID)
+                    xls_file = pd.ExcelFile(file)
+                    all_rows_data = []
+                    all_clean_cols = []
                     
-                    col_mapping = {}
-                    clean_columns = []
-                    for original_col in df.columns:
-                        c_cleaned = clean_column_name(original_col)
-                        col_mapping[original_col] = c_cleaned
-                        clean_columns.append(c_cleaned)
-                    
-                    df_renamed = df.rename(columns=col_mapping)
-                    
-                    rows_data = []
-                    for _, row in df_renamed.iterrows():
-                        row_dict = {}
-                        for col in df_renamed.columns:
-                            val = row[col]
-                            row_dict[col] = "" if pd.isna(val) else str(val).strip()
-                        rows_data.append(row_dict)
-                    
+                    for sheet_name in xls_file.sheet_names:
+                        df_sheet = pd.read_excel(xls_file, sheet_name=sheet_name)
+                        # تنظيف الأسماء أو تخطي السطور الفارغة
+                        for _, row in df_sheet.iterrows():
+                            row_dict = {}
+                            has_val = False
+                            for col in df_sheet.columns:
+                                val = row[col]
+                                c_clean = clean_column_name(col)
+                                if c_clean not in all_clean_cols and c_clean:
+                                    all_clean_cols.append(c_clean)
+                                s_val = "" if pd.isna(val) else str(val).strip()
+                                if s_val and s_val != 'nan':
+                                    has_val = True
+                                row_dict[c_clean] = s_val
+                            if has_val:
+                                all_rows_data.append(row_dict)
+
                     title_map = {
                         "students_registered": "الطلاب المسجلون",
                         "teachers_cards": "بطاقات الاساتذة",
@@ -420,7 +417,7 @@ def admin_dashboard():
                     if file_key == 'executed_hours':
                         monthly_map = {}
                         contract_map = {}
-                        for r in rows_data:
+                        for r in all_rows_data:
                             t_name = r.get('الاسم الثلاثي', r.get('اسم الاستاذ', '')).strip()
                             if t_name:
                                 if t_name not in monthly_map:
@@ -455,18 +452,19 @@ def admin_dashboard():
 
                     directorate_excel_tables[file_key] = {
                         "title": table_title,
-                        "columns": clean_columns,
-                        "data": rows_data,
+                        "columns": all_clean_cols if all_clean_cols else ["البيان"],
+                        "data": all_rows_data,
                         "monthly_hours": directorate_excel_tables.get('executed_hours', {}).get('monthly_hours', {})
                     }
                     
                     if file_key == 'weekly_schedule':
-                        parsed = parse_weekly_schedule(df)
+                        df_first = pd.read_excel(file)
+                        parsed = parse_weekly_schedule(df_first)
                         directorate_excel_tables['weekly_schedule']['parsed_schedule'] = parsed
 
                     if file_key == 'students_registered':
                         new_classes = {}
-                        for r in rows_data:
+                        for r in all_rows_data:
                             c_name = r.get('الصف', r.get('Class', r.get('التخصص', 'غير مصنف')))
                             s_name = r.get('اسم الطالب الكامل', r.get('اسم الطالب', r.get('الاسم الثلاثي', r.get('الاسم', ''))))
                             if c_name and s_name and str(c_name) != 'nan' and str(s_name) != 'nan':
@@ -485,17 +483,35 @@ def admin_dashboard():
                 msg = "الرجاء اختيار ملف صالح وتحديد نوع الجدول بدقة."
 
         elif action == 'create_auto_accounts':
-            t_cards = directorate_excel_tables.get('teachers_cards', {}).get('data', [])
             count = 0
-            for card in t_cards:
-                name = card.get('الاسم الثلاثي', card.get('الاسم', '')).strip()
-                if name:
-                    user_id = f"teacher_{len(teachers_db) + 1}"
-                    if not any(t['name'] == name for t in teachers_db.values()):
+            # توليد الحسابات من بطاقات الأساتذة ومن ملف أرقام البصمات (لتغطية كافة الأوراق والشيتات)
+            sources_to_scan = []
+            sources_to_scan.extend(directorate_excel_tables.get('teachers_cards', {}).get('data', []))
+            sources_to_scan.extend(directorate_excel_tables.get('fingerprint_ids', {}).get('data', []))
+            
+            for card in sources_to_scan:
+                # البحث عن أي حقل يحتمل أن يكون اسماً للأستاذ
+                name = ""
+                for k, v in card.items():
+                    if any(w in str(k) for w in ['اسم', 'الاسم', 'ملاك', 'متعاقد', 'الأساتذة', 'الاستاذ']) and len(str(v).strip()) > 2:
+                        if not str(v).isdigit() and 'ID' not in str(v) and 'بصمة' not in str(v):
+                            name = str(v).strip()
+                            break
+                if not name:
+                    # محاولة أخذ أول قيمتين نصيتين في السطر
+                    vals = [str(v).strip() for v in card.values() if v and not str(v).isdigit() and len(str(v).strip()) > 2]
+                    if vals:
+                        name = vals[0]
+
+                if name and name not in ['أساتذة الملاك', 'شراء الخدمات (خدمات اخرى)', 'شراءالخدمات (حراسة)', 'ID البصمة', 'بصمة ID']:
+                    # التحقق إذا كان الاسم غير موجود مسبقاً
+                    exists = any(t['name'] == name for t in teachers_db.values())
+                    if not exists:
+                        user_id = f"teacher_{len(teachers_db) + 1}"
                         teachers_db[user_id] = {
                             "name": name,
                             "password": "123",
-                            "subject": card.get('المادة', 'عام'),
+                            "subject": "عام",
                             "device_id": "",
                             "notifications": [],
                             "monthly_hours": {},
@@ -503,7 +519,7 @@ def admin_dashboard():
                         }
                         count += 1
             save_all_data()
-            msg = f"تم توليد ({count}) حساب جديد للأساتذة بكلمة سر افتراضية (123)!"
+            msg = f"تم توليد ({count}) حساب جديد للأساتذة بنجاح بكلمة سر افتراضية (123)!"
 
         elif action == 'reset_teacher_device':
             target_user = request.form.get('target_user')
@@ -561,25 +577,28 @@ def admin_dashboard():
         executed_hours_table_html = "<p style='color:#666;'>لم يتم رفع ملف الساعات المنفذة بعد.</p>"
 
     teachers_rows = ""
-    for u, t in teachers_db.items():
-        dev_stat = "<span style='color:#2e7d32; font-weight:bold;'>مرتبط برقم هاتف</span>" if t.get('device_id') else "<span style='color:#e65100;'>في انتظار تسجيل الهاتف</span>"
-        monthly_h = t.get('monthly_hours', {})
-        executed_hrs = sum([float(v) for v in monthly_h.values()]) if monthly_h else 0
-        contract_hrs = float(t.get('contract_hours', 300))
-        remaining_hrs = contract_hrs - executed_hrs
-        rem_color = "#2e7d32" if remaining_hrs >= 0 else "#c62828"
-        
-        teachers_rows += f"""
-        <tr>
-            <td><b>{t['name']}</b></td>
-            <td><code style='color:#0d47a1;'>{u}</code></td>
-            <td><code>{t['password']}</code></td>
-            <td>{dev_stat}</td>
-            <td><b>{int(contract_hrs)} ساعة</b></td>
-            <td><b style='color:#0d47a1;'>{executed_hrs:.0f} ساعة</b></td>
-            <td><b style='color:{rem_color};'>{remaining_hrs:.0f} ساعة</b></td>
-        </tr>
-        """
+    if teachers_db:
+        for u, t in teachers_db.items():
+            dev_stat = "<span style='color:#2e7d32; font-weight:bold;'>مرتبط برقم هاتف</span>" if t.get('device_id') else "<span style='color:#e65100;'>في انتظار تسجيل الهاتف</span>"
+            monthly_h = t.get('monthly_hours', {})
+            executed_hrs = sum([float(v) for v in monthly_h.values()]) if monthly_h else 0
+            contract_hrs = float(t.get('contract_hours', 300))
+            remaining_hrs = contract_hrs - executed_hrs
+            rem_color = "#2e7d32" if remaining_hrs >= 0 else "#c62828"
+            
+            teachers_rows += f"""
+            <tr>
+                <td><b>{t['name']}</b></td>
+                <td><code style='color:#0d47a1;'>{u}</code></td>
+                <td><code>{t['password']}</code></td>
+                <td>{dev_stat}</td>
+                <td><b>{int(contract_hrs)} ساعة</b></td>
+                <td><b style='color:#0d47a1;'>{executed_hrs:.0f} ساعة</b></td>
+                <td><b style='color:{rem_color};'>{remaining_hrs:.0f} ساعة</b></td>
+            </tr>
+            """
+    else:
+        teachers_rows = "<tr><td colspan='7' style='color:#666;'>لا توجد حسابات أساتذة مسجلة. ارفع ملفات الإكسل ثم اضغط على زر توليد الحسابات أعلاه.</td></tr>"
     
     field_rows = ""
     for fs in reversed(field_sessions):
@@ -622,7 +641,7 @@ def admin_dashboard():
         </div>
         """
 
-    teacher_opts = "".join([f"<option value='{u}'>{t['name']} ({u})</option>" for u, t in teachers_db.items()])
+    teacher_opts = "".join([f"<option value='{u}'>{t['name']} ({u})</option>" for u, t in teachers_db.items()]) if teachers_db else "<option value=''>-- لا توجد حسابات أساتذة --</option>"
     locations_opts = "".join([f"<option value='{loc}'>{loc}</option>" for loc in TRAINING_LOCATIONS.keys()])
 
     admin_template = '''
@@ -723,7 +742,7 @@ def admin_dashboard():
                 <h3 style="color:#0d47a1; margin-top:0;">👨‍🏫 سجل الأساتذة وحسابات الدخول وساعات العقود</h3>
                 <form method="POST" style="margin-bottom:15px;">
                     <input type="hidden" name="action" value="create_auto_accounts">
-                    <button type="submit" style="background:#2e7d32;">⚡ توليد يوزر وباسورد افتراضي لجميع الأساتذة تلقائياً</button>
+                    <button type="submit" style="background:#2e7d32;">⚡ توليد يوزر وباسورد افتراضي لجميع الأساتذة تلقائياً من الملفات المرفوعة</button>
                 </form>
                 <table>
                     <tr>
@@ -1073,7 +1092,7 @@ def submit_field_attendance():
     if session.get('role') != 'teacher': return jsonify({"success": False, "message": "غير مصرح"}), 403
     data = request.json
     s_id = int(data.get('session_id'))
-    loc_name = data.get('location')
+    loc_name = data.get('location')`
     lat = float(data.get('lat'))
     lng = float(data.get('lng'))
 
