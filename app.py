@@ -95,7 +95,7 @@ def load_from_disk(key, default_val=None):
             row = cur.fetchone()
             cur.close()
             conn.close()
-            if row and row['value'] is not None:
+            if row and row.get('value') is not None:
                 return row['value']
         except Exception as e:
             print(f"Error loading {key} from Supabase: {e}")
@@ -134,27 +134,33 @@ directorate_excel_tables = load_from_disk('directorate_excel_tables', {
 })
 
 def save_all_data():
-    save_to_disk('teachers_db', teachers_db)
-    save_to_disk('grades_db', grades_db)
-    save_to_disk('attendance_db', attendance_db)
-    save_to_disk('teacher_classes_map', teacher_classes_map)
-    save_to_disk('admin_replies', admin_replies)
-    save_to_disk('admin_credentials', admin_credentials)
-    save_to_disk('classes_students', classes_students)
-    save_to_disk('academic_years_db', academic_years_db)
-    save_to_disk('current_academic_year', current_academic_year)
-    save_to_disk('students_db', students_db)
-    save_to_disk('field_sessions', field_sessions)
-    save_to_disk('teacher_absences_log', teacher_absences_log)
-    save_to_disk('directorate_excel_tables', directorate_excel_tables)
+    try:
+        save_to_disk('teachers_db', teachers_db)
+        save_to_disk('grades_db', grades_db)
+        save_to_disk('attendance_db', attendance_db)
+        save_to_disk('teacher_classes_map', teacher_classes_map)
+        save_to_disk('admin_replies', admin_replies)
+        save_to_disk('admin_credentials', admin_credentials)
+        save_to_disk('classes_students', classes_students)
+        save_to_disk('academic_years_db', academic_years_db)
+        save_to_disk('current_academic_year', current_academic_year)
+        save_to_disk('students_db', students_db)
+        save_to_disk('field_sessions', field_sessions)
+        save_to_disk('teacher_absences_log', teacher_absences_log)
+        save_to_disk('directorate_excel_tables', directorate_excel_tables)
+    except Exception as e:
+        print(f"Error in save_all_data: {e}")
 
 def clean_column_name(col):
-    col_str = str(col).strip()
-    col_str = col_str.replace("&#x27;", "").replace("'", "").replace('"', '')
-    col_str = re.sub(r'^ش\s*', '', col_str)
-    if len(col_str) == 1 and col_str.isdigit():
-        col_str = '0' + col_str
-    return col_str
+    try:
+        col_str = str(col).strip()
+        col_str = col_str.replace("&#x27;", "").replace("'", "").replace('"', '')
+        col_str = re.sub(r'^ش\s*', '', col_str)
+        if len(col_str) == 1 and col_str.isdigit():
+            col_str = '0' + col_str
+        return col_str
+    except:
+        return "البيان"
 
 def calculate_distance(lat1, lon1, lat2, lon2):
     R = 6371000
@@ -172,27 +178,30 @@ def allowed_file(filename):
 def parse_weekly_schedule(df):
     parsed_teachers = {}
     current_class = "عام"
-    for _, row in df.iterrows():
-        first_col = str(row.iloc[0]).strip()
-        if "المستوى" in first_col or "الصف" in first_col:
-            current_class = first_col
-            continue
-        day_name = first_col
-        if day_name in ["الاثنين", "الثلاثاء", "الاربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]:
-            for col_idx in range(1, len(row)):
-                cell_val = row.iloc[col_idx]
-                if pd.notna(cell_val):
-                    cell_str = str(cell_val).strip()
-                    if "/***/" in cell_str:
-                        parts = cell_str.split("/***/")
-                        teacher_name = parts[0].strip()
-                        subject_name = parts[1].strip() if len(parts) > 1 else "مادة عامة"
-                        period_num = f"حصة {col_idx}"
-                        if teacher_name not in parsed_teachers:
-                            parsed_teachers[teacher_name] = []
-                        parsed_teachers[teacher_name].append({
-                            "day": day_name, "period": period_num, "class": current_class, "subject": subject_name
-                        })
+    try:
+        for _, row in df.iterrows():
+            first_col = str(row.iloc[0]).strip()
+            if "المستوى" in first_col or "الصف" in first_col:
+                current_class = first_col
+                continue
+            day_name = first_col
+            if day_name in ["الاثنين", "الثلاثاء", "الاربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]:
+                for col_idx in range(1, len(row)):
+                    cell_val = row.iloc[col_idx]
+                    if pd.notna(cell_val):
+                        cell_str = str(cell_val).strip()
+                        if "/***/" in cell_str:
+                            parts = cell_str.split("/***/")
+                            teacher_name = parts[0].strip()
+                            subject_name = parts[1].strip() if len(parts) > 1 else "مادة عامة"
+                            period_num = f"حصة {col_idx}"
+                            if teacher_name not in parsed_teachers:
+                                parsed_teachers[teacher_name] = []
+                            parsed_teachers[teacher_name].append({
+                                "day": day_name, "period": period_num, "class": current_class, "subject": subject_name
+                            })
+    except Exception as e:
+        print(f"Error parsing schedule: {e}")
     return parsed_teachers
 
 HEADER_VTE_HTML = '''
@@ -271,11 +280,11 @@ def login():
         password = request.form.get('password', '').strip()
         current_device_fingerprint = request.headers.get('User-Agent', 'unknown_device')
         
-        if username == admin_credentials['username'] and password == admin_credentials['password']:
+        if username == admin_credentials.get('username', 'admin') and password == admin_credentials.get('password', '123456'):
             session['username'] = 'admin'
             session['role'] = 'admin'
             return redirect(url_for('admin_dashboard'))
-        elif username in teachers_db and teachers_db[username]['password'] == password:
+        elif username in teachers_db and teachers_db[username].get('password') == password:
             t_data = teachers_db[username]
             if not t_data.get('device_id'):
                 t_data['device_id'] = current_device_fingerprint
@@ -496,7 +505,7 @@ def admin_dashboard():
                         name = vals[0]
 
                 if name and name not in ['أساتذة الملاك', 'شراء الخدمات (خدمات اخرى)', 'شراءالخدمات (حراسة)', 'ID البصمة', 'بصمة ID']:
-                    exists = any(t['name'] == name for t in teachers_db.values())
+                    exists = any(t.get('name') == name for t in teachers_db.values())
                     if not exists:
                         user_id = f"teacher_{len(teachers_db) + 1}"
                         teachers_db[user_id] = {
@@ -517,22 +526,22 @@ def admin_dashboard():
             if target_user in teachers_db:
                 teachers_db[target_user]['device_id'] = ''
                 save_all_data()
-                msg = f"تم مسح بصمة الجهاز وإعادة تعيين الهوية للأستاذ ({teachers_db[target_user]['name']}) بنجاح!"
+                msg = f"تم مسح بصمة الجهاز وإعادة تعيين الهوية للأستاذ ({teachers_db[target_user].get('name')}) بنجاح!"
 
         elif action == 'send_notification':
             target_user = request.form.get('target_user')
             notif = request.form.get('notification_text')
             if target_user == 'all':
                 for u, t in teachers_db.items():
-                    t['notifications'].append(f"📢 تعميم: {notif}")
+                    t.setdefault('notifications', []).append(f"📢 تعميم: {notif}")
                 msg = "تم إرسال التعميم لجميع الأساتذة!"
             elif target_user in teachers_db:
-                teachers_db[target_user]['notifications'].append(notif)
+                teachers_db[target_user].setdefault('notifications', []).append(notif)
                 msg = f"تم إرسال الإشعار للأستاذ بنجاح!"
             save_all_data()
 
         elif action == 'change_admin_password':
-            new_pass = request.form.get('new_password').strip()
+            new_pass = request.form.get('new_password', '').strip()
             if new_pass:
                 admin_credentials['password'] = new_pass
                 save_all_data()
@@ -579,9 +588,9 @@ def admin_dashboard():
             
             teachers_rows += f"""
             <tr>
-                <td><b>{t['name']}</b></td>
+                <td><b>{t.get('name')}</b></td>
                 <td><code style='color:#0d47a1;'>{u}</code></td>
-                <td><code>{t['password']}</code></td>
+                <td><code>{t.get('password')}</code></td>
                 <td>{dev_stat}</td>
                 <td><b>{int(contract_hrs)} ساعة</b></td>
                 <td><b style='color:#0d47a1;'>{executed_hrs:.0f} ساعة</b></td>
@@ -593,23 +602,23 @@ def admin_dashboard():
     
     field_rows = ""
     for fs in reversed(field_sessions):
-        stat = "<span style='color:#2e7d32; font-weight:bold;'>مكتملة بالـ GPS</span>" if fs['status']=='مكتملة' else "<span style='color:#e65100;'>قيد الانتظار</span>"
-        field_rows += f"<tr><td><b>{fs['location']}</b><br><small>{fs['class_name']}</small></td><td>{fs['primary_teacher']}</td><td>{stat}</td></tr>"
+        stat = "<span style='color:#2e7d32; font-weight:bold;'>مكتملة بالـ GPS</span>" if fs.get('status')=='مكتملة' else "<span style='color:#e65100;'>قيد الانتظار</span>"
+        field_rows += f"<tr><td><b>{fs.get('location')}</b><br><small>{fs.get('class_name')}</small></td><td>{fs.get('primary_teacher')}</td><td>{stat}</td></tr>"
 
     replies_html = ""
     for idx, r in enumerate(reversed(admin_replies)):
         real_idx = len(admin_replies) - 1 - idx
         replies_html += f"""
         <div style="background:#fff3e0; border-right:4px solid #e65100; padding:10px; margin-bottom:8px; border-radius:6px; display:flex; justify-content:space-between; align-items:center;">
-            <div><b>من: {r['teacher_name']}</b><br>{r['message']}</div>
+            <div><b>من: {r.get('teacher_name')}</b><br>{r.get('message')}</div>
             <form method="POST" action="/admin/delete_reply/{real_idx}" style="margin:0;"><button type="submit" style="background:#c62828; padding:5px 10px; width:auto;">مسح</button></form>
         </div>
         """
 
     directorate_htmls = {}
     for k, tinfo in directorate_excel_tables.items():
-        cols = tinfo['columns']
-        rows = tinfo['data']
+        cols = tinfo.get('columns', [])
+        rows = tinfo.get('data', [])
         headers_th = "".join([f"<th>{c}</th>" for c in cols]) if cols else "<th>لا توجد أعمدة</th>"
         body_tr = ""
         if rows:
@@ -621,7 +630,7 @@ def admin_dashboard():
 
         directorate_htmls[k] = f"""
         <div style="background:white; border:1px solid #bbdefb; border-radius:8px; padding:15px; margin-bottom:20px; box-shadow:0 2px 5px rgba(0,0,0,0.05);">
-            <h4 style="color:#0d47a1; margin-top:0; border-bottom:2px solid #e3f2fd; padding-bottom:8px;">📂 {tinfo['title']}</h4>
+            <h4 style="color:#0d47a1; margin-top:0; border-bottom:2px solid #e3f2fd; padding-bottom:8px;">📂 {tinfo.get('title')}</h4>
             <div style="overflow-x:auto;">
                 <table>
                     <tr>{headers_th}</tr>
@@ -632,7 +641,7 @@ def admin_dashboard():
         </div>
         """
 
-    teacher_opts = "".join([f"<option value='{u}'>{t['name']} ({u})</option>" for u, t in teachers_db.items()]) if teachers_db else "<option value=''>-- لا توجد حسابات أساتذة --</option>"
+    teacher_opts = "".join([f"<option value='{u}'>{t.get('name')} ({u})</option>" for u, t in teachers_db.items()]) if teachers_db else "<option value=''>-- لا توجد حسابات أساتذة --</option>"
     locations_opts = "".join([f"<option value='{loc}'>{loc}</option>" for loc in TRAINING_LOCATIONS.keys()])
 
     admin_template = '''
@@ -705,22 +714,22 @@ def admin_dashboard():
             </div>
 
             <div id="viewRegisteredStudents" class="card">
-                {{ directorate_htmls['students_registered'] | safe }}
+                {{ directorate_htmls.get('students_registered', '') | safe }}
             </div>
 
             <div id="viewTeachersCards" class="card">
-                {{ directorate_htmls['teachers_cards'] | safe }}
+                {{ directorate_htmls.get('teachers_cards', '') | safe }}
                 <div style="margin-top:15px;"></div>
-                {{ directorate_htmls['personal_info'] | safe }}
+                {{ directorate_htmls.get('personal_info', '') | safe }}
             </div>
 
             <div id="viewFingerprintIds" class="card">
                 <h3 style="color:#0d47a1; margin-top:0;">🆔 أرقام بصمات الأساتذة والموظفين (الملاك، المتعاقدين، شراء الخدمات)</h3>
-                {{ directorate_htmls['fingerprint_ids'] | safe }}
+                {{ directorate_htmls.get('fingerprint_ids', '') | safe }}
             </div>
 
             <div id="viewWeeklySchedule" class="card">
-                {{ directorate_htmls['weekly_schedule'] | safe }}
+                {{ directorate_htmls.get('weekly_schedule', '') | safe }}
             </div>
 
             <div id="viewExecutedHours" class="card">
@@ -928,7 +937,7 @@ def teacher_dashboard():
     teacher_schedule_items = parsed_schedule.get(t_name, [])
     schedule_html = ""
     if teacher_schedule_items:
-        schedule_rows = "".join([f"<tr><td><b>{item['day']}</b></td><td>{item['period']}</td><td>{item['class']}</td><td><b style='color:#0d47a1;'>{item['subject']}</b></td></tr>" for item in teacher_schedule_items])
+        schedule_rows = "".join([f"<tr><td><b>{item.get('day')}</b></td><td>{item.get('period')}</td><td>{item.get('class')}</td><td><b style='color:#0d47a1;'>{item.get('subject')}</b></td></tr>" for item in teacher_schedule_items])
         schedule_html = f"""
         <div class="card" style="border-top:4px solid #2e7d32;">
             <h4 style="color:#2e7d32; margin-top:0;">📅 برنامجي الأسبوعي:</h4>
@@ -936,18 +945,18 @@ def teacher_dashboard():
         </div>
         """
 
-    my_sessions = [s for s in field_sessions if s['primary_teacher'] == t_name or s['secondary_teacher'] == t_name]
+    my_sessions = [s for s in field_sessions if s.get('primary_teacher') == t_name or s.get('secondary_teacher') == t_name]
     field_html = ""
     for s in my_sessions:
-        if s['status'] == 'قيد التدريب':
+        if s.get('status') == 'قيد التدريب':
             field_html += f'''
             <div style="background:#f9fbe7; border:1px solid #c0ca33; padding:12px; border-radius:6px; margin-top:8px;">
-                <b>📍 مكان التدريب الميداني: {s['location']} ({s['class_name']})</b>
-                <button type="button" onclick="submitGps({s['id']}, '{t_name}', '{s['location']}')" style="background:#2e7d32; margin-top:8px;">📍 توثيق الحضور الجغرافي (GPS)</button>
+                <b>📍 مكان التدريب الميداني: {s.get('location')} ({s.get('class_name')})</b>
+                <button type="button" onclick="submitGps({s.get('id')}, '{t_name}', '{s.get('location')}')" style="background:#2e7d32; margin-top:8px;">📍 توثيق الحضور الجغرافي (GPS)</button>
             </div>
             '''
         else:
-            field_html += f'''<div style="background:#e8f5e9; padding:8px; border-radius:6px; margin-top:8px; color:#2e7d32; font-weight:bold;">✔ تم توثيق الحضور الجغرافي لـ ({s['location']}) بنجاح!</div>'''
+            field_html += f'''<div style="background:#e8f5e9; padding:8px; border-radius:6px; margin-top:8px; color:#2e7d32; font-weight:bold;">✔ تم توثيق الحضور الجغرافي لـ ({s.get('location')}) بنجاح!</div>'''
 
     teacher_template = """
     <!DOCTYPE html>
@@ -1092,7 +1101,7 @@ def submit_field_attendance():
         if dist > loc_data['radius_meters']:
             return jsonify({"success": False, "message": f"عذراً! أنت خارج نطاق موقع ({loc_name}). المسافة الحالية هي {int(dist)} متر."}), 400
 
-    s_item = next((s for s in field_sessions if s['id'] == s_id), None)
+    s_item = next((s for s in field_sessions if s.get('id') == s_id), None)
     if s_item:
         s_item['status'] = "مكتملة"
         save_all_data()
